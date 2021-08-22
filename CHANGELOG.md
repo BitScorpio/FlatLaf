@@ -1,12 +1,126 @@
 FlatLaf Change Log
 ==================
 
-## 1.2-SNAPSHOT
+## 1.6-SNAPSHOT
 
 #### New features and improvements
 
+- InternalFrame: Double-click on icon in internal frame title bar now closes the
+  internal frame. (issue #374)
+
+#### Fixed bugs
+
+- Menus: Fixed missing modifiers flags in `ActionEvent` (e.g. `Ctrl` key
+  pressed) when running in Java 9+ on Linux, macOS. Occurs also on Windows in
+  large popup menus that do not fit into the window. (issue #371; regression
+  since FlatLaf 1.3)
+
+
+## 1.5
+
+#### New features and improvements
+
+- SwingX: Added search and clear icons to `JXSearchField`. (issue #359)
+
+#### Fixed bugs
+
+- Button and TextComponent: Do not apply minimum width/height if margins are
+  set. (issue #364)
+- ComboBox and Spinner: Limit arrow button width if component has large
+  preferred height. (issue #361)
+- FileChooser: Fixed missing (localized) texts when FlatLaf is loaded in special
+  classloader (e.g. plugin system in Apache NetBeans).
+- InternalFrame: Limit internal frame bounds to parent bounds on resize. Also
+  honor maximum size of internal frame. (issue #362)
+- Popup: Fixed incorrectly placed drop shadow for medium-weight popups in
+  maximized windows. (issue #358)
+- Native window decorations (Windows 10 only):
+  - Fixed occasional application crash in `flatlaf-windows.dll`. (issue #357)
+  - When window is initially shown, fill background with window background color
+    (instead of white), which avoids flickering in dark themes. (issue 339)
+  - When resizing a window at the right/bottom edge, then first fill the new
+    space with the window background color (instead of black) before the layout
+    is updated.
+  - When resizing a window at the left/top edge, then first fill the new space
+    with the window background color (instead of garbage) before the layout is
+    updated.
+
+
+## 1.4
+
+#### New features and improvements
+
+- TextField, FormattedTextField and PasswordField: Support adding extra padding.
+  (set client property `JTextField.padding` to `Insets`).
+- PasswordField: UI delegate `FlatPasswordFieldUI` now extends `FlatTextFieldUI`
+  (instead of `BasicPasswordFieldUI`) to avoid duplicate code and for easier
+  extensibility.
+- Table and PopupFactory: Use `StackWalker` in Java 9+ for better performance.
+  (issue #334)
+- ToolBar: Paint focus indicator for focused button in toolbar. (issue #346)
+- ToolBar: Support focusable buttons in toolbar (set UI value
+  `ToolBar.focusableButtons` to `true`). (issue #346)
+
+#### Fixed bugs
+
+- ComboBox (editable) and Spinner: Increased size of internal text field to the
+  component border so that it behaves like plain text field (mouse click to left
+  of text now positions caret to first character instead of opening ComboBox
+  popup; mouse cursor is now of type "text" within the whole component, except
+  for arrow buttons). (issue #330)
+- ComboBox (not editable): Increased size of internal renderer pane to the
+  component border so that it can paint within the whole component. Also
+  increase combo box size if a custom renderer uses a border with insets that
+  are larger than the default combo box padding (`2,6,2,6`).
+- Fixed component heights at `1.25x`, `1.75x` and `2.25x` scaling factors (Java
+  8 only) so that Button, ComboBox, Spinner and TextField components (including
+  subclasses) have same heights. This increases heights of Button and TextField
+  components by:
+  - `2px` at `1.75x` in **Light** and **Dark** themes
+  - `2px` at `1.25x` and `2.25x` in **IntelliJ** and **Darcula** themes
+- OptionPane: Do not make child components, which are derived from `JPanel`,
+  non-opaque. (issue #349)
+- OptionPane: Align wrapped lines to the right if component orientation is
+  right-to-left. (issue #350)
+- PasswordField: Caps lock icon no longer painted over long text. (issue #172)
+- PasswordField: Paint caps lock icon on left side in right-to-left component
+  orientation.
+- Window decorations: Window title bar width is no longer considered when
+  calculating preferred/minimum width of window. (issue #351)
+
+
+## 1.3
+
+#### New features and improvements
+
+- TextComponents, ComboBox and Spinner: Support different background color when
+  component is focused (use UI values `TextField.focusedBackground`,
+  `PasswordField.focusedBackground`, `FormattedTextField.focusedBackground`,
+  `TextArea.focusedBackground`, `TextPane.focusedBackground`,
+  `EditorPane.focusedBackground`, `ComboBox.focusedBackground`,
+  `ComboBox.buttonFocusedBackground`, `ComboBox.popupBackground` and
+  `Spinner.focusedBackground`). (issue #335)
+
+#### Fixed bugs
+
+- Fixed white lines at bottom and right side of window (in dark themes on HiDPI
+  screens with scaling enabled).
+- ScrollBar: Fixed left/top arrow icon location (if visible). (issue #329)
+- Spinner: Fixed up/down arrow icon location.
+- ToolTip: Fixed positioning of huge tooltips. (issue #333)
+
+
+## 1.2
+
+#### New features and improvements
+
+- Renamed `Flat*Laf.install()` methods to `Flat*Laf.setup()` to avoid confusion
+  with `UIManager.installLookAndFeel(LookAndFeelInfo info)`. The old
+  `Flat*Laf.install()` methods are still there, but marked as deprecated. They
+  will be removed in a future version.
 - Button and ToggleButton: Support borderless button style (set client property
   `JButton.buttonType` to `borderless`). (PR #276)
+- ComboBox: Support using as cell renderer (e.g. in `JTable`).
 - DesktopPane: Improved layout of iconified internal frames in dock:
   - Always placed at bottom-left in desktop pane.
   - Newly iconified frames are added to the right side of the dock.
@@ -16,6 +130,8 @@ FlatLaf Change Log
 - TableHeader: Moved table header column border painting from
   `FlatTableHeaderUI` to new border `FlatTableHeaderBorder` to improve
   compatibility with custom table header implementations. (issue #228)
+- Linux: Enable text anti-aliasing if no Gnome or KDE Desktop properties are
+  available. (issue #218)
 - IntelliJ Themes: Added "Material Theme UI Lite / GitHub Dark" theme.
 - JIDE Common Layer: Improved support for `JideTabbedPane`. (PR #306)
 - Extras: `FlatSVGIcon` improvements:
@@ -23,10 +139,11 @@ FlatLaf Change Log
   - Use mapper function in color filter to dynamically map colors. (PR #303)
   - Color filter supports light and dark themes.
   - Getters for icon name, classloader, etc.
-- Renamed `Flat*Laf.install()` methods to `Flat*Laf.setup()` to avoid confusion
-  with `UIManager.installLookAndFeel(LookAndFeelInfo info)`. The old
-  `Flat*Laf.install()` methods are still there, but marked as deprecated. They
-  will be removed in a future version.
+- Extras: UI Inspector: Show class hierarchies when pressing <kbd>Alt</kbd> key
+  and prettified class names (dimmed package name).
+- Extras: `FlatSVGUtils.createWindowIconImages()` now returns a single
+  multi-resolution image that creates requested image sizes on demand from SVG
+  (only on Windows with Java 9+).
 
 #### Fixed bugs
 
@@ -41,8 +158,25 @@ FlatLaf Change Log
     internal frames in dock.
 - PopupFactory: Fixed occasional `NullPointerException` in
   `FlatPopupFactory.fixToolTipLocation()`. (issue #305)
+- Tree: Fill cell background if
+  `DefaultTreeCellRenderer.setBackgroundNonSelectionColor(Color)` was used.
+  (issue #322)
 - IntelliJ Themes: Fixed background colors of DesktopPane and DesktopIcon in all
   themes.
+- Native window decorations:
+  - Fixed slow application startup under particular conditions. (e.g. incomplete
+    custom JRE) (issue #319)
+  - Fixed occasional double window title bar when creating many frames or
+    dialogs. (issue #315)
+  - Fixed broken maximizing window (under special conditions) when restoring
+    frame state at startup.
+  - Title icon: For multi-resolution images now use `getResolutionVariant(width,
+    height)` (instead of `getResolutionVariants()`) to allow creation of
+    requested size on demand. This also avoids creation of all resolution
+    variants.
+  - Double-click at upper-left corner of maximized frame did not close window.
+    (issue #326)
+- Linux: Fixed/improved detection of user font settings. (issue #309)
 
 
 ## 1.1.2

@@ -27,7 +27,11 @@ import java.awt.Insets;
 import java.awt.LayoutManager;
 import java.awt.LayoutManager2;
 import java.awt.Window;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.ComponentListener;
 import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
 import java.util.function.Function;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
@@ -36,6 +40,7 @@ import javax.swing.JLayeredPane;
 import javax.swing.JMenuBar;
 import javax.swing.JRootPane;
 import javax.swing.LookAndFeel;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.border.Border;
 import javax.swing.plaf.BorderUIResource;
@@ -79,6 +84,8 @@ public class FlatRootPaneUI
 
 	private Object nativeWindowBorderData;
 	private LayoutManager oldLayout;
+	private PropertyChangeListener ancestorListener;
+	private ComponentListener componentListener;
 
 	public static ComponentUI createUI( JComponent c ) {
 		return new FlatRootPaneUI();
@@ -134,6 +141,61 @@ public class FlatRootPaneUI
 		// enable dark window appearance on macOS when running in JetBrains Runtime
 		if( SystemInfo.isJetBrainsJVM && SystemInfo.isMacOS_10_14_Mojave_orLater )
 			c.putClientProperty( "jetbrains.awt.windowDarkAppearance", FlatLaf.isLafDark() );
+	}
+
+	@Override
+	protected void installListeners( JRootPane root ) {
+		super.installListeners( root );
+
+		if( SystemInfo.isJava_9_orLater ) {
+			// On HiDPI screens, where scaling is used, there may be white lines at the
+			// bottom and at the right side of the window when it is initially shown.
+			// This is very disturbing in dark themes, but hard to notice in light themes.
+			// Seems to be a rounding issue when Swing adds dirty region of window
+			// using RepaintManager.nativeAddDirtyRegion().
+			//
+			// Note: Not using a HierarchyListener here, which would be much easier,
+			// because this causes problems with mouse clicks in heavy-weight popups.
+			// Instead, add a listener to the root pane that waits until it is added
+			// to a window, then add a component listener to the window.
+			// See: https://github.com/JFormDesigner/FlatLaf/issues/371
+			ancestorListener = e -> {
+				Object oldValue = e.getOldValue();
+				Object newValue = e.getNewValue();
+				if( newValue instanceof Window ) {
+					if( componentListener == null ) {
+						componentListener = new ComponentAdapter() {
+							@Override
+							public void componentShown( ComponentEvent e ) {
+								// add whole root pane to dirty regions when window is initially shown
+								root.getParent().repaint( root.getX(), root.getY(), root.getWidth(), root.getHeight() );
+							}
+						};
+					}
+					((Window)newValue).addComponentListener( componentListener );
+				} else if( newValue == null && oldValue instanceof Window ) {
+					if( componentListener != null )
+						((Window)oldValue).removeComponentListener( componentListener );
+				}
+			};
+			root.addPropertyChangeListener( "ancestor", ancestorListener );
+		}
+	}
+
+	@Override
+	protected void uninstallListeners( JRootPane root ) {
+		super.uninstallListeners( root );
+
+		if( SystemInfo.isJava_9_orLater ) {
+			if( componentListener != null ) {
+				Window window = SwingUtilities.windowForComponent( root );
+				if( window != null )
+					window.removeComponentListener( componentListener );
+				componentListener = null;
+			}
+			root.removePropertyChangeListener( "ancestor", ancestorListener );
+			ancestorListener = null;
+		}
 	}
 
 	/**
@@ -306,7 +368,7 @@ public class FlatRootPaneUI
 				? getSizeFunc.apply( rootPane.getContentPane() )
 				: rootPane.getSize();
 
-			int width = Math.max( titlePaneSize.width, contentSize.width );
+			int width = contentSize.width; // title pane width is not considered here
 			int height = titlePaneSize.height + contentSize.height;
 			if( titlePane == null || !titlePane.isMenuBarEmbedded() ) {
 				JMenuBar menuBar = rootPane.getJMenuBar();

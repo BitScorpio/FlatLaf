@@ -107,6 +107,8 @@ public class FlatTreeUI
 	protected boolean wideSelection;
 	protected boolean showCellFocusIndicator;
 
+	private Color defaultCellNonSelectionBackground;
+
 	public static ComponentUI createUI( JComponent c ) {
 		return new FlatTreeUI();
 	}
@@ -124,6 +126,8 @@ public class FlatTreeUI
 		selectionBorderColor = UIManager.getColor( "Tree.selectionBorderColor" );
 		wideSelection = UIManager.getBoolean( "Tree.wideSelection" );
 		showCellFocusIndicator = UIManager.getBoolean( "Tree.showCellFocusIndicator" );
+
+		defaultCellNonSelectionBackground = UIManager.getColor( "Tree.textBackground" );
 
 		// scale
 		int rowHeight = FlatUIUtils.getUIInt( "Tree.rowHeight", 16 );
@@ -144,6 +148,8 @@ public class FlatTreeUI
 		selectionInactiveBackground = null;
 		selectionInactiveForeground = null;
 		selectionBorderColor = null;
+
+		defaultCellNonSelectionBackground = null;
 	}
 
 	@Override
@@ -222,6 +228,26 @@ public class FlatTreeUI
 		Rectangle r = tree.getPathBounds( loc.getPath() );
 		if( r != null )
 			tree.repaint( 0, r.y, tree.getWidth(), r.height );
+	}
+
+	@Override
+	public Rectangle getPathBounds( JTree tree, TreePath path ) {
+		Rectangle bounds = super.getPathBounds( tree, path );
+
+		// If this method was invoked from JTree.getPathForLocation(int x, int y) to check whether
+		// the location is within tree node bounds, then return the bounds of a wide node.
+		// This changes the behavior of JTree.getPathForLocation(int x, int y) and
+		// JTree.getRowForLocation(int x, int y), which now return the path/row even
+		// if [x,y] is in the wide row area outside of the actual tree node.
+		if( bounds != null &&
+			isWideSelection() &&
+			UIManager.getBoolean( "FlatLaf.experimental.tree.widePathForLocation" ) &&
+			StackUtils.wasInvokedFrom( JTree.class.getName(), "getPathForLocation", 5 ) )
+		{
+			bounds.x = 0;
+			bounds.width = tree.getWidth();
+		}
+		return bounds;
 	}
 
 	/**
@@ -306,24 +332,24 @@ public class FlatTreeUI
 				}
 			} else {
 				// non-wide selection
-				int xOffset = 0;
-				int imageOffset = 0;
-
-				if( rendererComponent instanceof JLabel ) {
-					JLabel label = (JLabel) rendererComponent;
-					Icon icon = label.getIcon();
-					imageOffset = (icon != null && label.getText() != null)
-						? icon.getIconWidth() + Math.max( label.getIconTextGap() - 1, 0 )
-						: 0;
-					xOffset = label.getComponentOrientation().isLeftToRight() ? imageOffset : 0;
-				}
-
-				g.fillRect( bounds.x + xOffset, bounds.y, bounds.width - imageOffset, bounds.height );
+				paintCellBackground( g, rendererComponent, bounds );
 			}
 
 			// this is actually not necessary because renderer should always set color
 			// before painting, but doing anyway to avoid any side effect (in bad renderers)
 			g.setColor( oldColor );
+		} else {
+			// paint cell background if DefaultTreeCellRenderer.getBackgroundNonSelectionColor() is set
+			if( rendererComponent instanceof DefaultTreeCellRenderer ) {
+				DefaultTreeCellRenderer renderer = (DefaultTreeCellRenderer) rendererComponent;
+				Color bg = renderer.getBackgroundNonSelectionColor();
+				if( bg != null && !bg.equals( defaultCellNonSelectionBackground ) ) {
+					Color oldColor = g.getColor();
+					g.setColor( bg );
+					paintCellBackground( g, rendererComponent, bounds );
+					g.setColor( oldColor );
+				}
+			}
 		}
 
 		// paint renderer
@@ -335,6 +361,22 @@ public class FlatTreeUI
 			((DefaultTreeCellRenderer)rendererComponent).setBackgroundSelectionColor( oldBackgroundSelectionColor );
 		if( oldBorderSelectionColor != null )
 			((DefaultTreeCellRenderer)rendererComponent).setBorderSelectionColor( oldBorderSelectionColor );
+	}
+
+	private void paintCellBackground( Graphics g, Component rendererComponent, Rectangle bounds ) {
+		int xOffset = 0;
+		int imageOffset = 0;
+
+		if( rendererComponent instanceof JLabel ) {
+			JLabel label = (JLabel) rendererComponent;
+			Icon icon = label.getIcon();
+			imageOffset = (icon != null && label.getText() != null)
+				? icon.getIconWidth() + Math.max( label.getIconTextGap() - 1, 0 )
+				: 0;
+			xOffset = label.getComponentOrientation().isLeftToRight() ? imageOffset : 0;
+		}
+
+		g.fillRect( bounds.x + xOffset, bounds.y, bounds.width - imageOffset, bounds.height );
 	}
 
 	/**

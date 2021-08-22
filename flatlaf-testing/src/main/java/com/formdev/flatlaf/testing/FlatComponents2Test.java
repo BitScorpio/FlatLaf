@@ -24,6 +24,7 @@ import java.awt.EventQueue;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
+import java.awt.event.*;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -39,6 +40,7 @@ import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeCellRenderer;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreeCellRenderer;
+import javax.swing.tree.TreePath;
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.icons.FlatMenuArrowIcon;
@@ -69,6 +71,7 @@ public class FlatComponents2Test
 		SwingUtilities.invokeLater( () -> {
 			FlatTestFrame frame = FlatTestFrame.create( args, "FlatComponents2Test" );
 			frame.useApplyComponentOrientation = true;
+			UIManager.put( "FlatLaf.experimental.tree.widePathForLocation", true );
 			frame.showFrame( FlatComponents2Test::new );
 		} );
 	}
@@ -134,6 +137,7 @@ public class FlatComponents2Test
 			"January", "February", "March", "April", "May", "June",
 			"July", "August", "September", "October", "November", "December"
 		};
+		cm.getColumn(2).setCellRenderer( new TestComboBoxTableCellRenderer() );
 		cm.getColumn(2).setCellEditor( new DefaultCellEditor( new JComboBox<>( months ) ) );
 		JComboBox<String> editableComboBox = new JComboBox<>( months );
 		editableComboBox.setEditable( true );
@@ -377,6 +381,23 @@ public class FlatComponents2Test
 			tree.putClientProperty( FlatClientProperties.TREE_PAINT_SELECTION, paintSelection );
 	}
 
+	private void treeMouseClicked( MouseEvent e ) {
+		JTree tree = (JTree) e.getSource();
+		int x = e.getX();
+		int y = e.getY();
+
+		TreePath path = tree.getPathForLocation( x, y );
+		TreePath closestPath = tree.getClosestPathForLocation( x, y );
+		int row = tree.getRowForLocation( x, y );
+		int closestRow = tree.getClosestRowForLocation( x, y );
+
+		System.out.println( "---- tree mouseClicked " + x + "," + y + " ----" );
+		System.out.println( "        path:  " + path );
+		System.out.println( "closest path:  " + closestPath );
+		System.out.println( "        row:   " + row );
+		System.out.println( "closest row:   " + closestRow );
+	}
+
 	@Override
 	public void applyComponentOrientation( ComponentOrientation o ) {
 		super.applyComponentOrientation( o );
@@ -604,6 +625,12 @@ public class FlatComponents2Test
 			//---- tree1 ----
 			tree1.setShowsRootHandles(true);
 			tree1.setEditable(true);
+			tree1.addMouseListener(new MouseAdapter() {
+				@Override
+				public void mouseClicked(MouseEvent e) {
+					treeMouseClicked(e);
+				}
+			});
 			scrollPane3.setViewportView(tree1);
 		}
 		add(scrollPane3, "cell 1 2");
@@ -613,6 +640,12 @@ public class FlatComponents2Test
 
 			//---- tree2 ----
 			tree2.setEnabled(false);
+			tree2.addMouseListener(new MouseAdapter() {
+				@Override
+				public void mouseClicked(MouseEvent e) {
+					treeMouseClicked(e);
+				}
+			});
 			scrollPane4.setViewportView(tree2);
 		}
 		add(scrollPane4, "cell 2 2");
@@ -654,12 +687,28 @@ public class FlatComponents2Test
 
 		//======== scrollPane5 ========
 		{
+
+			//---- xTree1 ----
+			xTree1.addMouseListener(new MouseAdapter() {
+				@Override
+				public void mouseClicked(MouseEvent e) {
+					treeMouseClicked(e);
+				}
+			});
 			scrollPane5.setViewportView(xTree1);
 		}
 		add(scrollPane5, "cell 1 3");
 
 		//======== scrollPane6 ========
 		{
+
+			//---- checkBoxTree1 ----
+			checkBoxTree1.addMouseListener(new MouseAdapter() {
+				@Override
+				public void mouseClicked(MouseEvent e) {
+					treeMouseClicked(e);
+				}
+			});
 			scrollPane6.setViewportView(checkBoxTree1);
 		}
 		add(scrollPane6, "cell 2 3");
@@ -1199,9 +1248,26 @@ public class FlatComponents2Test
 		extends DefaultTreeCellRenderer
 	{
 		public TestDefaultTreeCellRenderer() {
-			setBackgroundNonSelectionColor( Color.red );
 			setBackgroundSelectionColor( Color.green );
 			setTextSelectionColor( Color.blue );
+		}
+
+		@Override
+		public Component getTreeCellRendererComponent( JTree tree, Object value, boolean sel, boolean expanded,
+			boolean leaf, int row, boolean hasFocus )
+		{
+			Color nonSelectionBg = null;
+			Color nonSelectionFg = null;
+			switch( String.valueOf( value ) ) {
+				case "blue":		nonSelectionFg = Color.blue; break;
+				case "red":		nonSelectionFg = Color.red; break;
+				case "yellow":	nonSelectionBg = Color.yellow; break;
+				case "violet":	nonSelectionBg = Color.magenta; break;
+			}
+			setBackgroundNonSelectionColor( nonSelectionBg );
+			setTextNonSelectionColor( (nonSelectionFg != null) ? nonSelectionFg : UIManager.getColor( "Tree.textForeground" ) );
+
+			return super.getTreeCellRendererComponent( tree, value, sel, expanded, leaf, row, hasFocus );
 		}
 	}
 
@@ -1216,6 +1282,25 @@ public class FlatComponents2Test
 			boolean leaf, int row, boolean hasFocus )
 		{
 			setText( String.valueOf( value ) );
+			return this;
+		}
+	}
+
+	//---- class TestComboBoxTableCellRenderer --------------------------------
+
+	private static class TestComboBoxTableCellRenderer
+		extends JComboBox<String>
+		implements TableCellRenderer
+	{
+		@Override
+		public Component getTableCellRendererComponent( JTable table, Object value, boolean isSelected,
+			boolean hasFocus, int row, int column )
+		{
+			setModel( new DefaultComboBoxModel<>( new String[] { String.valueOf( value ) } ) );
+
+			setBackground( isSelected ? table.getSelectionBackground() : table.getBackground() );
+			setForeground( isSelected ? table.getSelectionForeground() : table.getForeground() );
+			setBorder( null );
 			return this;
 		}
 	}

@@ -30,6 +30,7 @@ import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.geom.RoundRectangle2D;
 import java.beans.PropertyChangeEvent;
+import java.util.Objects;
 import javax.swing.AbstractButton;
 import javax.swing.ButtonModel;
 import javax.swing.Icon;
@@ -129,6 +130,7 @@ public class FlatButtonUI
 	protected Color toolbarSelectedBackground;
 
 	private Icon helpButtonIcon;
+	private Insets defaultMargin;
 
 	private boolean defaults_initialized = false;
 
@@ -184,6 +186,7 @@ public class FlatButtonUI
 			toolbarSelectedBackground = UIManager.getColor( prefix + "toolbar.selectedBackground" );
 
 			helpButtonIcon = UIManager.getIcon( "HelpButton.icon" );
+			defaultMargin = UIManager.getInsets( prefix + "margin" );
 
 			defaults_initialized = true;
 		}
@@ -499,14 +502,21 @@ public class FlatButtonUI
 		} else if( isIconOnlyOrSingleCharacter && ((AbstractButton)c).getIcon() == null ) {
 			// make single-character-no-icon button square (increase width)
 			prefSize.width = Math.max( prefSize.width, prefSize.height );
-		} else if( !isIconOnlyOrSingleCharacter && !isToolBarButton( c ) && c.getBorder() instanceof FlatButtonBorder ) {
+		} else if( !isIconOnlyOrSingleCharacter && !isToolBarButton( c ) &&
+			c.getBorder() instanceof FlatButtonBorder && hasDefaultMargins( c ) )
+		{
 			// apply minimum width/height
-			float focusWidth = FlatUIUtils.getBorderFocusWidth( c );
-			prefSize.width = Math.max( prefSize.width, scale( FlatUIUtils.minimumWidth( c, minimumWidth ) ) + Math.round( focusWidth * 2 ) );
-			prefSize.height = Math.max( prefSize.height, scale( FlatUIUtils.minimumHeight( c, 0 ) ) + Math.round( focusWidth * 2 ) );
+			int fw = Math.round( FlatUIUtils.getBorderFocusWidth( c ) * 2 );
+			prefSize.width = Math.max( prefSize.width, scale( FlatUIUtils.minimumWidth( c, minimumWidth ) ) + fw );
+			prefSize.height = Math.max( prefSize.height, scale( FlatUIUtils.minimumHeight( c, 0 ) ) + fw );
 		}
 
 		return prefSize;
+	}
+
+	private boolean hasDefaultMargins( JComponent c ) {
+		Insets margin = ((AbstractButton)c).getMargin();
+		return margin instanceof UIResource && Objects.equals( margin, defaultMargin );
 	}
 
 	//---- class FlatButtonListener -------------------------------------------

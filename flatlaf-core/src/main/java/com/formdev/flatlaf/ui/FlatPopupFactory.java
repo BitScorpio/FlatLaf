@@ -20,12 +20,16 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.GraphicsConfiguration;
+import java.awt.GraphicsDevice;
+import java.awt.GraphicsEnvironment;
 import java.awt.Insets;
 import java.awt.MouseInfo;
 import java.awt.Panel;
 import java.awt.Point;
 import java.awt.PointerInfo;
 import java.awt.Rectangle;
+import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.ComponentEvent;
 import java.awt.event.ComponentListener;
@@ -40,6 +44,7 @@ import javax.swing.Popup;
 import javax.swing.PopupFactory;
 import javax.swing.RootPaneContainer;
 import javax.swing.SwingUtilities;
+import javax.swing.ToolTipManager;
 import javax.swing.UIManager;
 import javax.swing.border.Border;
 import com.formdev.flatlaf.FlatClientProperties;
@@ -63,7 +68,7 @@ public class FlatPopupFactory
 	public Popup getPopup( Component owner, Component contents, int x, int y )
 		throws IllegalArgumentException
 	{
-		Point pt = fixToolTipLocation( contents, x, y );
+		Point pt = fixToolTipLocation( owner, contents, x, y );
 		if( pt != null ) {
 			x = pt.x;
 			y = pt.y;
@@ -207,13 +212,13 @@ public class FlatPopupFactory
 	/**
 	 * Usually ToolTipManager places a tooltip at (mouseLocation.x, mouseLocation.y + 20).
 	 * In case that the tooltip would be partly outside of the screen,
-	 * ToolTipManagerthe changes the location so that the entire tooltip fits on screen.
+	 * the ToolTipManager changes the location so that the entire tooltip fits on screen.
 	 * But this can place the tooltip under the mouse location and hide the owner component.
 	 * <p>
 	 * This method checks whether the current mouse location is within tooltip bounds
 	 * and corrects the y-location so that the tooltip is placed above the mouse location.
 	 */
-	private Point fixToolTipLocation( Component contents, int x, int y ) {
+	private Point fixToolTipLocation( Component owner, Component contents, int x, int y ) {
 		if( !(contents instanceof JToolTip) || !wasInvokedFromToolTipManager() )
 			return null;
 
@@ -229,18 +234,34 @@ public class FlatPopupFactory
 		if( !tipBounds.contains( mouseLocation ) )
 			return null;
 
-		// place tooltip above mouse location
-		return new Point( x, mouseLocation.y - tipSize.height - UIScale.scale( 20 ) );
+		// find GraphicsConfiguration at mouse location (similar to ToolTipManager.getDrawingGC())
+		GraphicsConfiguration gc = null;
+		for( GraphicsDevice device : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices() ) {
+			GraphicsConfiguration dgc = device.getDefaultConfiguration();
+			if( dgc.getBounds().contains( mouseLocation ) ) {
+				gc = dgc;
+				break;
+			}
+		}
+		if( gc == null )
+			gc = owner.getGraphicsConfiguration();
+		if( gc == null )
+			return null;
+
+		Rectangle screenBounds = gc.getBounds();
+		Insets screenInsets = Toolkit.getDefaultToolkit().getScreenInsets( gc );
+		int screenTop = screenBounds.y + screenInsets.top;
+
+		// place tooltip above mouse location if there is enough space
+		int newY =  mouseLocation.y - tipSize.height - UIScale.scale( 20 );
+		if( newY < screenTop )
+			return null;
+
+		return new Point( x, newY );
 	}
 
 	private boolean wasInvokedFromToolTipManager() {
-		StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
-		for( StackTraceElement stackTraceElement : stackTrace ) {
-			if( "javax.swing.ToolTipManager".equals( stackTraceElement.getClassName() ) &&
-				"showTipWindow".equals( stackTraceElement.getMethodName() ) )
-			  return true;
-		}
-		return false;
+		return StackUtils.wasInvokedFrom( ToolTipManager.class.getName(), "showTipWindow", 8 );
 	}
 
 	//---- class NonFlashingPopup ---------------------------------------------
@@ -468,6 +489,9 @@ public class FlatPopupFactory
 			JLayeredPane layeredPane = ((RootPaneContainer)window).getLayeredPane();
 			layeredPane.add( dropShadowPanel, JLayeredPane.POPUP_LAYER, 0 );
 
+			moveMediumWeightDropShadow();
+			resizeMediumWeightDropShadow();
+
 			mediumPanelListener = new ComponentListener() {
 				@Override
 				public void componentShown( ComponentEvent e ) {
@@ -483,17 +507,12 @@ public class FlatPopupFactory
 
 				@Override
 				public void componentMoved( ComponentEvent e ) {
-					if( dropShadowPanel != null && mediumWeightPanel != null ) {
-						Point location = mediumWeightPanel.getLocation();
-						Insets insets = dropShadowPanel.getInsets();
-						dropShadowPanel.setLocation( location.x - insets.left, location.y - insets.top );
-					}
+					moveMediumWeightDropShadow();
 				}
 
 				@Override
 				public void componentResized( ComponentEvent e ) {
-					if( dropShadowPanel != null )
-						dropShadowPanel.setSize( FlatUIUtils.addInsets( mediumWeightPanel.getSize(), dropShadowPanel.getInsets() ) );
+					resizeMediumWeightDropShadow();
 				}
 			};
 			mediumWeightPanel.addComponentListener( mediumPanelListener );
@@ -508,6 +527,19 @@ public class FlatPopupFactory
 				parent.remove( dropShadowPanel );
 				parent.repaint( bounds.x, bounds.y, bounds.width, bounds.height );
 			}
+		}
+
+		private void moveMediumWeightDropShadow() {
+			if( dropShadowPanel != null && mediumWeightPanel != null ) {
+				Point location = mediumWeightPanel.getLocation();
+				Insets insets = dropShadowPanel.getInsets();
+				dropShadowPanel.setLocation( location.x - insets.left, location.y - insets.top );
+			}
+		}
+
+		private void resizeMediumWeightDropShadow() {
+			if( dropShadowPanel != null && mediumWeightPanel != null )
+				dropShadowPanel.setSize( FlatUIUtils.addInsets( mediumWeightPanel.getSize(), dropShadowPanel.getInsets() ) );
 		}
 	}
 }

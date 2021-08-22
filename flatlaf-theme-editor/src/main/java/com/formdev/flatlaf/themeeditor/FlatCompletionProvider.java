@@ -110,14 +110,13 @@ class FlatCompletionProvider
 				switch( lineBeforeCaret.charAt( i ) ) {
 					case '=':
 					case '(':
+					case ',':
 						return getValueProvider();
 
 					case '$':
 					case '@':
 						return getReferenceProvider();
 
-					case ' ':
-					case '\t':
 					case '#': // colors
 						return null;
 				}
@@ -355,8 +354,33 @@ class FlatCompletionProvider
 				"options", "(optional) [derived]" );
 			addFunction( "spin",
 				"color", colorParamDesc,
-				"angle", "number of degrees to rotate",
+				"angle", "number of degrees to rotate (0-360)",
 				"options", "(optional) [derived]" );
+
+			addFunction( "changeHue",
+				"color", colorParamDesc,
+				"angle", "number of degrees (0-360)",
+				"options", "(optional) [derived]" );
+			String[] hslChangeParams = {
+				"color", colorParamDesc,
+				"value", "0-100%",
+				"options", "(optional) [derived]"
+			};
+			addFunction( "changeSaturation", hslChangeParams );
+			addFunction( "changeLightness", hslChangeParams );
+			addFunction( "changeAlpha", hslChangeParams );
+
+			String weightParamDesc = "(optional) 0-100%, default is 50%";
+			addFunction( "mix",
+				"color1", colorParamDesc,
+				"color2", colorParamDesc,
+				"weight", weightParamDesc );
+			addFunction( "tint",
+				"color", colorParamDesc,
+				"weight", weightParamDesc );
+			addFunction( "shade",
+				"color", colorParamDesc,
+				"weight", weightParamDesc );
 		}
 
 		private void addFunction( String name, String... paramNamesAndDescs ) {

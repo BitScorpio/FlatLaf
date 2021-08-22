@@ -21,6 +21,12 @@ plugins {
 	`flatlaf-publish`
 }
 
+dependencies {
+	testImplementation( "org.junit.jupiter:junit-jupiter-api:5.7.2" )
+	testImplementation( "org.junit.jupiter:junit-jupiter-params" )
+	testRuntimeOnly( "org.junit.jupiter:junit-jupiter-engine" )
+}
+
 java {
 	withSourcesJar()
 	withJavadocJar()
@@ -45,22 +51,17 @@ tasks {
 		}
 	}
 
-	javadoc {
-		options {
-			this as StandardJavadocDocletOptions
-			use( true )
-			tags = listOf( "uiDefault", "clientProperty" )
-			addStringOption( "Xdoclint:all,-missing", "-Xdoclint:all,-missing" )
-		}
-		isFailOnError = false
-	}
-
-	named<Jar>("sourcesJar" ) {
+	named<Jar>( "sourcesJar" ) {
 		archiveBaseName.set( "flatlaf" )
 	}
 
-	named<Jar>("javadocJar" ) {
+	named<Jar>( "javadocJar" ) {
 		archiveBaseName.set( "flatlaf" )
+	}
+
+	test {
+		useJUnitPlatform()
+		testLogging.exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
 	}
 }
 

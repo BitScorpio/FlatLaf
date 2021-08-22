@@ -18,13 +18,23 @@ package com.formdev.flatlaf.themeeditor;
 
 import java.awt.Color;
 import java.awt.KeyboardFocusManager;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import javax.swing.ActionMap;
+import javax.swing.InputMap;
+import javax.swing.KeyStroke;
+import javax.swing.UIManager;
 import javax.swing.text.BadLocationException;
 import org.fife.ui.rsyntaxtextarea.TextEditorPane;
 import org.fife.ui.rsyntaxtextarea.Token;
+import org.fife.ui.rtextarea.RTextArea;
+import org.fife.ui.rtextarea.RTextAreaUI;
 import com.formdev.flatlaf.UIDefaultsLoaderAccessor;
+import com.formdev.flatlaf.themeeditor.FlatSyntaxTextAreaActions.DuplicateLinesAction;
+import com.formdev.flatlaf.themeeditor.FlatSyntaxTextAreaActions.IncrementNumberAction;
 
 /**
  * A text area that supports editing FlatLaf themes.
@@ -40,9 +50,33 @@ class FlatSyntaxTextArea
 	private final Map<String, Color> parsedColorsMap = new HashMap<>();
 
 	FlatSyntaxTextArea() {
+		// this is necessary because RTextAreaBase.init() always sets foreground to black
+		setForeground( UIManager.getColor( "TextArea.foreground" ) );
+
 		// remove Ctrl+Tab and Ctrl+Shift+Tab focus traversal keys to allow tabbed pane to process them
 		setFocusTraversalKeys( KeyboardFocusManager.FORWARD_TRAVERSAL_KEYS, Collections.emptySet() );
 		setFocusTraversalKeys( KeyboardFocusManager.BACKWARD_TRAVERSAL_KEYS, Collections.emptySet() );
+
+		// add editor actions
+		ActionMap actionMap = getActionMap();
+		actionMap.put( FlatSyntaxTextAreaActions.duplicateLinesUpAction, new DuplicateLinesAction( FlatSyntaxTextAreaActions.duplicateLinesUpAction, true ) );
+		actionMap.put( FlatSyntaxTextAreaActions.duplicateLinesDownAction, new DuplicateLinesAction( FlatSyntaxTextAreaActions.duplicateLinesDownAction, false ) );
+		actionMap.put( FlatSyntaxTextAreaActions.incrementNumberAction, new IncrementNumberAction( FlatSyntaxTextAreaActions.incrementNumberAction, true ) );
+		actionMap.put( FlatSyntaxTextAreaActions.decrementNumberAction, new IncrementNumberAction( FlatSyntaxTextAreaActions.decrementNumberAction, false ) );
+
+		// add editor key strokes
+		InputMap inputMap = getInputMap();
+		int defaultModifier = RTextArea.getDefaultModifier();
+		int alt = InputEvent.ALT_DOWN_MASK;
+		inputMap.put( KeyStroke.getKeyStroke( KeyEvent.VK_UP,   defaultModifier|alt), FlatSyntaxTextAreaActions.duplicateLinesUpAction );
+		inputMap.put( KeyStroke.getKeyStroke( KeyEvent.VK_DOWN, defaultModifier|alt), FlatSyntaxTextAreaActions.duplicateLinesDownAction );
+		inputMap.put( KeyStroke.getKeyStroke( KeyEvent.VK_UP,   defaultModifier), FlatSyntaxTextAreaActions.incrementNumberAction );
+		inputMap.put( KeyStroke.getKeyStroke( KeyEvent.VK_DOWN, defaultModifier), FlatSyntaxTextAreaActions.decrementNumberAction );
+	}
+
+	@Override
+	protected RTextAreaUI createRTextAreaUI() {
+		return new FlatRSyntaxTextAreaUI( this );
 	}
 
 	boolean isUseColorOfColorTokens() {

@@ -52,6 +52,7 @@ import com.formdev.flatlaf.ui.FlatUIUtils;
 import com.formdev.flatlaf.util.DerivedColor;
 import com.formdev.flatlaf.util.GrayFilter;
 import com.formdev.flatlaf.util.HSLColor;
+import com.formdev.flatlaf.util.LoggingFacade;
 import com.formdev.flatlaf.util.ScaledEmptyBorder;
 import com.formdev.flatlaf.util.UIScale;
 
@@ -377,11 +378,12 @@ public class FlatUIDefaultsInspector
 	}
 
 	private Properties loadDerivedColorKeys() {
+		String name = "/com/formdev/flatlaf/extras/resources/DerivedColorKeys.properties";
 		Properties properties = new Properties();
-		try( InputStream in = getClass().getResourceAsStream( "/com/formdev/flatlaf/extras/resources/DerivedColorKeys.properties" ) ) {
+		try( InputStream in = getClass().getResourceAsStream( name ) ) {
 			properties.load( in );
 		} catch( IOException ex ) {
-			ex.printStackTrace();
+			LoggingFacade.INSTANCE.logSevere( "FlatLaf: Failed to load '" + name + "'.", ex );
 		}
 		return properties;
 	}
@@ -698,16 +700,16 @@ public class FlatUIDefaultsInspector
 			if( value instanceof Color ) {
 				Color color = (info instanceof Color[]) ? ((Color[])info)[0] : (Color) value;
 				HSLColor hslColor = new HSLColor( color );
+				int hue = Math.round( hslColor.getHue() );
+				int saturation = Math.round( hslColor.getSaturation() );
+				int luminance = Math.round( hslColor.getLuminance() );
 				if( color.getAlpha() == 255 ) {
 					return String.format( "%-9s HSL %3d %3d %3d",
-						color2hex( color ),
-						(int) hslColor.getHue(), (int) hslColor.getSaturation(),
-						(int) hslColor.getLuminance() );
+						color2hex( color ), hue, saturation, luminance );
 				} else {
+					int alpha = Math.round( hslColor.getAlpha() * 100 );
 					return String.format( "%-9s HSL %3d %3d %3d %2d",
-						color2hex( color ),
-						(int) hslColor.getHue(), (int) hslColor.getSaturation(),
-						(int) hslColor.getLuminance(), (int) (hslColor.getAlpha() * 100) );
+						color2hex( color ), hue, saturation, luminance, alpha );
 				}
 			} else if( value instanceof Insets ) {
 				Insets insets = (Insets) value;

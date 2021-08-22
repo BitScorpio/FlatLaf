@@ -20,6 +20,8 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Insets;
+import java.awt.event.FocusListener;
 import java.beans.PropertyChangeEvent;
 import javax.swing.JComponent;
 import javax.swing.JTextArea;
@@ -52,6 +54,7 @@ import com.formdev.flatlaf.util.HiDPIUtils;
  * @uiDefault Component.isIntelliJTheme			boolean
  * @uiDefault TextArea.disabledBackground		Color	used if not enabled
  * @uiDefault TextArea.inactiveBackground		Color	used if not editable
+ * @uiDefault TextArea.focusedBackground		Color	optional
  *
  * @author Karl Tauber
  */
@@ -63,6 +66,11 @@ public class FlatTextAreaUI
 	protected Color background;
 	protected Color disabledBackground;
 	protected Color inactiveBackground;
+	protected Color focusedBackground;
+
+	private Insets defaultMargin;
+
+	private FocusListener focusListener;
 
 	public static ComponentUI createUI( JComponent c ) {
 		return new FlatTextAreaUI();
@@ -84,6 +92,9 @@ public class FlatTextAreaUI
 		background = UIManager.getColor( "TextArea.background" );
 		disabledBackground = UIManager.getColor( "TextArea.disabledBackground" );
 		inactiveBackground = UIManager.getColor( "TextArea.inactiveBackground" );
+		focusedBackground = UIManager.getColor( "TextArea.focusedBackground" );
+
+		defaultMargin = UIManager.getInsets( "TextArea.margin" );
 	}
 
 	@Override
@@ -93,6 +104,24 @@ public class FlatTextAreaUI
 		background = null;
 		disabledBackground = null;
 		inactiveBackground = null;
+		focusedBackground = null;
+	}
+
+	@Override
+	protected void installListeners() {
+		super.installListeners();
+
+		// necessary to update focus background
+		focusListener = new FlatUIUtils.RepaintFocusListener( getComponent(), c -> focusedBackground != null );
+		getComponent().addFocusListener( focusListener );
+	}
+
+	@Override
+	protected void uninstallListeners() {
+		super.uninstallListeners();
+
+		getComponent().removeFocusListener( focusListener );
+		focusListener = null;
 	}
 
 	@Override
@@ -146,7 +175,7 @@ public class FlatTextAreaUI
 		if( c instanceof JTextArea && ((JTextArea)c).getColumns() > 0 )
 			return size;
 
-		return FlatEditorPaneUI.applyMinimumWidth( c, size, minimumWidth );
+		return FlatEditorPaneUI.applyMinimumWidth( c, size, minimumWidth, defaultMargin );
 	}
 
 	@Override
@@ -156,14 +185,6 @@ public class FlatTextAreaUI
 
 	@Override
 	protected void paintBackground( Graphics g ) {
-		JTextComponent c = getComponent();
-
-		// for compatibility with IntelliJ themes
-		if( isIntelliJTheme && (!c.isEnabled() || !c.isEditable()) && (c.getBackground() instanceof UIResource) ) {
-			FlatUIUtils.paintParentBackground( g, c );
-			return;
-		}
-
-		super.paintBackground( g );
+		FlatEditorPaneUI.paintBackground( g, getComponent(), isIntelliJTheme, focusedBackground );
 	}
 }

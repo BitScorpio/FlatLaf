@@ -16,17 +16,18 @@
 
 package com.formdev.flatlaf.ui;
 
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Insets;
+import java.awt.event.FocusListener;
 import java.beans.PropertyChangeEvent;
 import javax.swing.JComponent;
 import javax.swing.JEditorPane;
 import javax.swing.UIManager;
 import javax.swing.plaf.ComponentUI;
-import javax.swing.plaf.UIResource;
 import javax.swing.plaf.basic.BasicTextPaneUI;
-import javax.swing.text.JTextComponent;
 import com.formdev.flatlaf.util.HiDPIUtils;
 
 /**
@@ -51,6 +52,7 @@ import com.formdev.flatlaf.util.HiDPIUtils;
  *
  * @uiDefault Component.minimumWidth			int
  * @uiDefault Component.isIntelliJTheme			boolean
+ * @uiDefault TextPane.focusedBackground		Color	optional
  *
  * @author Karl Tauber
  */
@@ -59,8 +61,12 @@ public class FlatTextPaneUI
 {
 	protected int minimumWidth;
 	protected boolean isIntelliJTheme;
+	protected Color focusedBackground;
+
+	private Insets defaultMargin;
 
 	private Object oldHonorDisplayProperties;
+	private FocusListener focusListener;
 
 	public static ComponentUI createUI( JComponent c ) {
 		return new FlatTextPaneUI();
@@ -70,8 +76,12 @@ public class FlatTextPaneUI
 	protected void installDefaults() {
 		super.installDefaults();
 
+		String prefix = getPropertyPrefix();
 		minimumWidth = UIManager.getInt( "Component.minimumWidth" );
 		isIntelliJTheme = UIManager.getBoolean( "Component.isIntelliJTheme" );
+		focusedBackground = UIManager.getColor( prefix + ".focusedBackground" );
+
+		defaultMargin = UIManager.getInsets( prefix + ".margin" );
 
 		// use component font and foreground for HTML text
 		oldHonorDisplayProperties = getComponent().getClientProperty( JEditorPane.HONOR_DISPLAY_PROPERTIES );
@@ -82,7 +92,26 @@ public class FlatTextPaneUI
 	protected void uninstallDefaults() {
 		super.uninstallDefaults();
 
+		focusedBackground = null;
+
 		getComponent().putClientProperty( JEditorPane.HONOR_DISPLAY_PROPERTIES, oldHonorDisplayProperties );
+	}
+
+	@Override
+	protected void installListeners() {
+		super.installListeners();
+
+		// necessary to update focus background
+		focusListener = new FlatUIUtils.RepaintFocusListener( getComponent(), c -> focusedBackground != null );
+		getComponent().addFocusListener( focusListener );
+	}
+
+	@Override
+	protected void uninstallListeners() {
+		super.uninstallListeners();
+
+		getComponent().removeFocusListener( focusListener );
+		focusListener = null;
 	}
 
 	@Override
@@ -93,12 +122,12 @@ public class FlatTextPaneUI
 
 	@Override
 	public Dimension getPreferredSize( JComponent c ) {
-		return FlatEditorPaneUI.applyMinimumWidth( c, super.getPreferredSize( c ), minimumWidth );
+		return FlatEditorPaneUI.applyMinimumWidth( c, super.getPreferredSize( c ), minimumWidth, defaultMargin );
 	}
 
 	@Override
 	public Dimension getMinimumSize( JComponent c ) {
-		return FlatEditorPaneUI.applyMinimumWidth( c, super.getMinimumSize( c ), minimumWidth );
+		return FlatEditorPaneUI.applyMinimumWidth( c, super.getMinimumSize( c ), minimumWidth, defaultMargin );
 	}
 
 	@Override
@@ -108,14 +137,6 @@ public class FlatTextPaneUI
 
 	@Override
 	protected void paintBackground( Graphics g ) {
-		JTextComponent c = getComponent();
-
-		// for compatibility with IntelliJ themes
-		if( isIntelliJTheme && (!c.isEnabled() || !c.isEditable()) && (c.getBackground() instanceof UIResource) ) {
-			FlatUIUtils.paintParentBackground( g, c );
-			return;
-		}
-
-		super.paintBackground( g );
+		FlatEditorPaneUI.paintBackground( g, getComponent(), isIntelliJTheme, focusedBackground );
 	}
 }

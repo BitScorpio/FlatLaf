@@ -37,6 +37,8 @@ import java.util.function.Supplier;
 import java.util.prefs.Preferences;
 import javax.swing.*;
 import net.miginfocom.swing.*;
+import com.formdev.flatlaf.FlatDarkLaf;
+import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 import com.formdev.flatlaf.extras.FlatInspector;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
@@ -59,10 +61,17 @@ public class FlatThemeFileEditor
 	private static final String KEY_RECENT_DIRECTORY = "recentDirectory";
 	private static final String KEY_RECENT_FILE = "recentFile";
 	private static final String KEY_WINDOW_BOUNDS = "windowBounds";
+	private static final String KEY_PREVIEW = "preview";
+	private static final String KEY_LAF = "laf";
+	private static final String KEY_FONT_SIZE_INCR = "fontSizeIncr";
+	private static final String KEY_HSL_COLORS = "hslColors";
+	private static final String KEY_RGB_COLORS = "rgbColors";
 
 	private File dir;
 	private Preferences state;
 	private boolean inLoadDirectory;
+
+	private final FlatThemePropertiesBaseManager propertiesBaseManager = new FlatThemePropertiesBaseManager();
 
 	public static void main( String[] args ) {
 		File dir = (args.length > 0)
@@ -70,7 +79,15 @@ public class FlatThemeFileEditor
 			: null;
 
 		SwingUtilities.invokeLater( () -> {
-			FlatLightLaf.setup();
+			FlatLaf.registerCustomDefaultsSource( "com.formdev.flatlaf.themeeditor" );
+
+			try {
+				String laf = Preferences.userRoot().node( PREFS_ROOT_PATH ).get( KEY_LAF, FlatLightLaf.class.getName() );
+				UIManager.setLookAndFeel( laf );
+			} catch( Exception ex ) {
+				FlatLightLaf.setup();
+			}
+
 			FlatInspector.install( "ctrl alt shift X" );
 			FlatUIDefaultsInspector.install( "ctrl shift alt Y" );
 
@@ -83,6 +100,8 @@ public class FlatThemeFileEditor
 		initComponents();
 
 		openDirectoryButton.setIcon( new FlatSVGIcon( "com/formdev/flatlaf/themeeditor/icons/menu-open.svg" ) );
+		if( UIManager.getLookAndFeel() instanceof FlatDarkLaf )
+			darkLafMenuItem.setSelected( true );
 
 		restoreState();
 		restoreWindowBounds();
@@ -173,6 +192,7 @@ public class FlatThemeFileEditor
 			return;
 
 		this.dir = dir;
+		propertiesBaseManager.clear();
 
 		inLoadDirectory = true;
 
@@ -194,9 +214,7 @@ public class FlatThemeFileEditor
 		for( File file : getPropertiesFiles( dir ) )
 			openFile( file, file.getName().equals( recentFile ) );
 
-		FlatThemeEditorPane themeEditorPane = (FlatThemeEditorPane) tabbedPane.getSelectedComponent();
-		if( themeEditorPane != null )
-			themeEditorPane.requestFocusInWindow();
+		activateEditor();
 
 		saveState();
 
@@ -240,8 +258,23 @@ public class FlatThemeFileEditor
 		File[] propertiesFiles = dir.listFiles( (d, name) -> {
 			return name.endsWith( ".properties" );
 		} );
-		Arrays.sort( propertiesFiles );
+		Arrays.sort( propertiesFiles, (f1, f2) -> {
+			String n1 = toSortName( f1.getName() );
+			String n2 = toSortName( f2.getName() );
+			return n1.compareToIgnoreCase( n2 );
+		} );
 		return propertiesFiles;
+	}
+
+	private String toSortName( String name ) {
+		switch( name ) {
+			case "FlatLaf.properties":			return "\0\0";
+			case "FlatLightLaf.properties":		return "\0\1";
+			case "FlatDarkLaf.properties":		return "\0\2";
+			case "FlatIntelliJLaf.properties":	return "\0\3";
+			case "FlatDarculaLaf.properties":	return "\0\4";
+			default:							return name;
+		}
 	}
 
 	private void openFile( File file, boolean select ) {
@@ -252,6 +285,8 @@ public class FlatThemeFileEditor
 			ex.printStackTrace(); // TODO
 		}
 
+		themeEditorPane.initBasePropertyProvider( propertiesBaseManager );
+
 		Supplier<String> titleFun = () -> {
 			return (themeEditorPane.isDirty() ? "* " : "")
 				+ StringUtils.removeTrailing( themeEditorPane.getFile().getName(), ".properties" );
@@ -261,6 +296,9 @@ public class FlatThemeFileEditor
 			if( index >= 0 )
 				tabbedPane.setTitleAt( index, titleFun.get() );
 		} );
+
+		if( state.getBoolean( KEY_PREVIEW, true ) )
+			themeEditorPane.showPreview( true );
 
 		tabbedPane.addTab( titleFun.get(), null, themeEditorPane, file.getAbsolutePath() );
 
@@ -312,30 +350,96 @@ public class FlatThemeFileEditor
 		return result;
 	}
 
-	private void nextEditor() {
-		if( tabbedPane.getTabCount() == 0 )
-			return;
+	private void activateEditor() {
+		FlatThemeEditorPane themeEditorPane = (FlatThemeEditorPane) tabbedPane.getSelectedComponent();
+		if( themeEditorPane != null )
+			themeEditorPane.requestFocusInWindow();
+	}
 
-		int index = tabbedPane.getSelectedIndex() + 1;
-		if( index >= tabbedPane.getTabCount() )
-			index = 0;
-		tabbedPane.setSelectedIndex( index );
+	private void nextEditor() {
+		notifyTabbedPaneAction( tabbedPane.getActionMap().get( "navigatePageDown" ) );
 	}
 
 	private void previousEditor() {
-		if( tabbedPane.getTabCount() == 0 )
-			return;
+		notifyTabbedPaneAction( tabbedPane.getActionMap().get( "navigatePageUp" ) );
+	}
 
-		int index = tabbedPane.getSelectedIndex() - 1;
-		if( index < 0 )
-			index = tabbedPane.getTabCount() - 1;
-		tabbedPane.setSelectedIndex( index );
+	private void notifyTabbedPaneAction( Action action ) {
+		if( action != null && action.isEnabled() )
+			action.actionPerformed( new ActionEvent( tabbedPane, ActionEvent.ACTION_PERFORMED, null ) );
 	}
 
 	private void find() {
 		FlatThemeEditorPane themeEditorPane = (FlatThemeEditorPane) tabbedPane.getSelectedComponent();
 		if( themeEditorPane != null )
 			themeEditorPane.showFindReplaceBar();
+	}
+
+	private void showHidePreview() {
+		boolean show = previewMenuItem.isSelected();
+		for( FlatThemeEditorPane themeEditorPane : getThemeEditorPanes() )
+			themeEditorPane.showPreview( show );
+		putPrefsBoolean( state, KEY_PREVIEW, show, true );
+	}
+
+	private void lightLaf() {
+		applyLookAndFeel( FlatLightLaf.class.getName() );
+	}
+
+	private void darkLaf() {
+		applyLookAndFeel( FlatDarkLaf.class.getName() );
+	}
+
+	private void applyLookAndFeel( String lafClassName ) {
+		if( UIManager.getLookAndFeel().getClass().getName().equals( lafClassName ) )
+			return;
+
+		try {
+			UIManager.setLookAndFeel( lafClassName );
+			FlatLaf.updateUI();
+			for( FlatThemeEditorPane themeEditorPane : getThemeEditorPanes() )
+				themeEditorPane.updateTheme();
+			state.put( KEY_LAF, lafClassName );
+		} catch( Exception ex ) {
+			ex.printStackTrace();
+		}
+	}
+
+	private void incrFontSize() {
+		applyFontSizeIncr( getFontSizeIncr() + 1 );
+	}
+
+	private void decrFontSize() {
+		applyFontSizeIncr( getFontSizeIncr() - 1 );
+	}
+
+	private void resetFontSize() {
+		applyFontSizeIncr( 0 );
+	}
+
+	private void applyFontSizeIncr( int sizeIncr ) {
+		if( sizeIncr < -5 )
+			sizeIncr = -5;
+		if( sizeIncr == getFontSizeIncr() )
+			return;
+
+		for( FlatThemeEditorPane themeEditorPane : getThemeEditorPanes() )
+			themeEditorPane.updateFontSize( sizeIncr );
+		state.putInt( KEY_FONT_SIZE_INCR, sizeIncr );
+	}
+
+	private int getFontSizeIncr() {
+		return state.getInt( KEY_FONT_SIZE_INCR, 0 );
+	}
+
+	private void colorModelChanged() {
+		FlatThemeEditorOverlay.showHSL = showHSLColorsMenuItem.isSelected();
+		FlatThemeEditorOverlay.showRGB = showRGBColorsMenuItem.isSelected();
+
+		putPrefsBoolean( state, KEY_HSL_COLORS, FlatThemeEditorOverlay.showHSL, true );
+		putPrefsBoolean( state, KEY_RGB_COLORS, FlatThemeEditorOverlay.showRGB, false );
+
+		repaint();
 	}
 
 	private void restoreState() {
@@ -345,6 +449,15 @@ public class FlatThemeFileEditor
 		String[] directories = getPrefsStrings( state, KEY_DIRECTORIES );
 		SortedComboBoxModel<String> model = new SortedComboBoxModel<>( directories );
 		directoryField.setModel( model );
+
+		// restore overlay color models
+		FlatThemeEditorOverlay.showHSL = state.getBoolean( KEY_HSL_COLORS, true );
+		FlatThemeEditorOverlay.showRGB = state.getBoolean( KEY_RGB_COLORS, false );
+
+		// restore menu item selection
+		previewMenuItem.setSelected( state.getBoolean( KEY_PREVIEW, true ) );
+		showHSLColorsMenuItem.setSelected( FlatThemeEditorOverlay.showHSL );
+		showRGBColorsMenuItem.setSelected( FlatThemeEditorOverlay.showRGB );
 	}
 
 	private void saveState() {
@@ -365,10 +478,10 @@ public class FlatThemeFileEditor
 			List<String> list = StringUtils.split( windowBoundsStr, ',' );
 			if( list.size() >= 4 ) {
 				try {
-					int x = Integer.parseInt( list.get( 0 ) );
-					int y = Integer.parseInt( list.get( 1 ) );
-					int w = Integer.parseInt( list.get( 2 ) );
-					int h = Integer.parseInt( list.get( 3 ) );
+					int x = UIScale.scale( Integer.parseInt( list.get( 0 ) ) );
+					int y = UIScale.scale( Integer.parseInt( list.get( 1 ) ) );
+					int w = UIScale.scale( Integer.parseInt( list.get( 2 ) ) );
+					int h = UIScale.scale( Integer.parseInt( list.get( 3 ) ) );
 
 					// limit to screen size
 					GraphicsConfiguration gc = getGraphicsConfiguration();
@@ -400,7 +513,18 @@ public class FlatThemeFileEditor
 
 	private void saveWindowBounds() {
 		Rectangle r = getBounds();
-		state.put( KEY_WINDOW_BOUNDS, r.x + "," + r.y + ',' + r.width + ',' + r.height );
+		int x = UIScale.unscale( r.x );
+		int y = UIScale.unscale( r.y );
+		int width = UIScale.unscale( r.width );
+		int height = UIScale.unscale( r.height );
+		state.put( KEY_WINDOW_BOUNDS, x + "," + y + ',' + width + ',' + height );
+	}
+
+	private static void putPrefsBoolean( Preferences prefs, String key, boolean value, boolean defaultValue ) {
+		if( value != defaultValue )
+			prefs.putBoolean( key, value );
+		else
+			prefs.remove( key );
 	}
 
 	private static void putPrefsString( Preferences prefs, String key, String value ) {
@@ -438,7 +562,17 @@ public class FlatThemeFileEditor
 		exitMenuItem = new JMenuItem();
 		editMenu = new JMenu();
 		findMenuItem = new JMenuItem();
+		viewMenu = new JMenu();
+		previewMenuItem = new JCheckBoxMenuItem();
+		lightLafMenuItem = new JRadioButtonMenuItem();
+		darkLafMenuItem = new JRadioButtonMenuItem();
+		incrFontSizeMenuItem = new JMenuItem();
+		decrFontSizeMenuItem = new JMenuItem();
+		resetFontSizeMenuItem = new JMenuItem();
+		showHSLColorsMenuItem = new JCheckBoxMenuItem();
+		showRGBColorsMenuItem = new JCheckBoxMenuItem();
 		windowMenu = new JMenu();
+		activateEditorMenuItem = new JMenuItem();
 		nextEditorMenuItem = new JMenuItem();
 		previousEditorMenuItem = new JMenuItem();
 		controlPanel = new JPanel();
@@ -512,14 +646,80 @@ public class FlatThemeFileEditor
 			}
 			menuBar.add(editMenu);
 
+			//======== viewMenu ========
+			{
+				viewMenu.setText("View");
+				viewMenu.setMnemonic('V');
+
+				//---- previewMenuItem ----
+				previewMenuItem.setText("Preview");
+				previewMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_P, KeyEvent.CTRL_DOWN_MASK));
+				previewMenuItem.addActionListener(e -> showHidePreview());
+				viewMenu.add(previewMenuItem);
+				viewMenu.addSeparator();
+
+				//---- lightLafMenuItem ----
+				lightLafMenuItem.setText("Light Laf");
+				lightLafMenuItem.setMnemonic('L');
+				lightLafMenuItem.setSelected(true);
+				lightLafMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F1, KeyEvent.ALT_DOWN_MASK));
+				lightLafMenuItem.addActionListener(e -> lightLaf());
+				viewMenu.add(lightLafMenuItem);
+
+				//---- darkLafMenuItem ----
+				darkLafMenuItem.setText("Dark Laf");
+				darkLafMenuItem.setMnemonic('D');
+				darkLafMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F2, KeyEvent.ALT_DOWN_MASK));
+				darkLafMenuItem.addActionListener(e -> darkLaf());
+				viewMenu.add(darkLafMenuItem);
+				viewMenu.addSeparator();
+
+				//---- incrFontSizeMenuItem ----
+				incrFontSizeMenuItem.setText("Increase Font Size");
+				incrFontSizeMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_PLUS, Toolkit.getDefaultToolkit().getMenuShortcutKeyMask()));
+				incrFontSizeMenuItem.addActionListener(e -> incrFontSize());
+				viewMenu.add(incrFontSizeMenuItem);
+
+				//---- decrFontSizeMenuItem ----
+				decrFontSizeMenuItem.setText("Decrease Font Size");
+				decrFontSizeMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_MINUS, Toolkit.getDefaultToolkit().getMenuShortcutKeyMask()));
+				decrFontSizeMenuItem.addActionListener(e -> decrFontSize());
+				viewMenu.add(decrFontSizeMenuItem);
+
+				//---- resetFontSizeMenuItem ----
+				resetFontSizeMenuItem.setText("Reset Font Size");
+				resetFontSizeMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_0, Toolkit.getDefaultToolkit().getMenuShortcutKeyMask()));
+				resetFontSizeMenuItem.addActionListener(e -> resetFontSize());
+				viewMenu.add(resetFontSizeMenuItem);
+				viewMenu.addSeparator();
+
+				//---- showHSLColorsMenuItem ----
+				showHSLColorsMenuItem.setText("Show HSL colors");
+				showHSLColorsMenuItem.addActionListener(e -> colorModelChanged());
+				viewMenu.add(showHSLColorsMenuItem);
+
+				//---- showRGBColorsMenuItem ----
+				showRGBColorsMenuItem.setText("Show RGB colors (hex)");
+				showRGBColorsMenuItem.addActionListener(e -> colorModelChanged());
+				viewMenu.add(showRGBColorsMenuItem);
+			}
+			menuBar.add(viewMenu);
+
 			//======== windowMenu ========
 			{
 				windowMenu.setText("Window");
 				windowMenu.setMnemonic('W');
 
+				//---- activateEditorMenuItem ----
+				activateEditorMenuItem.setText("Activate Editor");
+				activateEditorMenuItem.setMnemonic('A');
+				activateEditorMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F12, 0));
+				activateEditorMenuItem.addActionListener(e -> activateEditor());
+				windowMenu.add(activateEditorMenuItem);
+
 				//---- nextEditorMenuItem ----
 				nextEditorMenuItem.setText("Next Editor");
-				nextEditorMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, Toolkit.getDefaultToolkit().getMenuShortcutKeyMask()));
+				nextEditorMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_PAGE_DOWN, Toolkit.getDefaultToolkit().getMenuShortcutKeyMask()));
 				nextEditorMenuItem.setMnemonic('N');
 				nextEditorMenuItem.addActionListener(e -> nextEditor());
 				windowMenu.add(nextEditorMenuItem);
@@ -527,7 +727,7 @@ public class FlatThemeFileEditor
 				//---- previousEditorMenuItem ----
 				previousEditorMenuItem.setText("Previous Editor");
 				previousEditorMenuItem.setMnemonic('P');
-				previousEditorMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, Toolkit.getDefaultToolkit().getMenuShortcutKeyMask()|KeyEvent.SHIFT_MASK));
+				previousEditorMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_PAGE_UP, Toolkit.getDefaultToolkit().getMenuShortcutKeyMask()));
 				previousEditorMenuItem.addActionListener(e -> previousEditor());
 				windowMenu.add(previousEditorMenuItem);
 			}
@@ -570,6 +770,11 @@ public class FlatThemeFileEditor
 			tabbedPane.addChangeListener(e -> selectedTabChanged());
 		}
 		contentPane.add(tabbedPane, BorderLayout.CENTER);
+
+		//---- lafButtonGroup ----
+		ButtonGroup lafButtonGroup = new ButtonGroup();
+		lafButtonGroup.add(lightLafMenuItem);
+		lafButtonGroup.add(darkLafMenuItem);
 		// JFormDesigner - End of component initialization  //GEN-END:initComponents
 	}
 
@@ -581,7 +786,17 @@ public class FlatThemeFileEditor
 	private JMenuItem exitMenuItem;
 	private JMenu editMenu;
 	private JMenuItem findMenuItem;
+	private JMenu viewMenu;
+	private JCheckBoxMenuItem previewMenuItem;
+	private JRadioButtonMenuItem lightLafMenuItem;
+	private JRadioButtonMenuItem darkLafMenuItem;
+	private JMenuItem incrFontSizeMenuItem;
+	private JMenuItem decrFontSizeMenuItem;
+	private JMenuItem resetFontSizeMenuItem;
+	private JCheckBoxMenuItem showHSLColorsMenuItem;
+	private JCheckBoxMenuItem showRGBColorsMenuItem;
 	private JMenu windowMenu;
+	private JMenuItem activateEditorMenuItem;
 	private JMenuItem nextEditorMenuItem;
 	private JMenuItem previousEditorMenuItem;
 	private JPanel controlPanel;
@@ -644,9 +859,11 @@ public class FlatThemeFileEditor
 				else if( cmp > 0 )
 					high = mid - 1;
 				else
-					return mid; // key found
+					return mid; // found
 			}
-			return -(low + 1); // key not found.
+
+			// not found
+			return -(low + 1);
 	    }
 	}
 }

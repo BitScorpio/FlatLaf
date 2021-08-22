@@ -21,6 +21,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Insets;
@@ -39,6 +40,7 @@ import javax.swing.LookAndFeel;
 import javax.swing.SwingConstants;
 import javax.swing.UIManager;
 import javax.swing.plaf.ComponentUI;
+import javax.swing.plaf.UIResource;
 import javax.swing.plaf.basic.BasicSpinnerUI;
 import com.formdev.flatlaf.FlatClientProperties;
 
@@ -65,6 +67,7 @@ import com.formdev.flatlaf.FlatClientProperties;
  * @uiDefault Component.disabledBorderColor		Color
  * @uiDefault Spinner.disabledBackground		Color
  * @uiDefault Spinner.disabledForeground		Color
+ * @uiDefault Spinner.focusedBackground			Color	optional
  * @uiDefault Spinner.buttonBackground			Color
  * @uiDefault Spinner.buttonArrowColor			Color
  * @uiDefault Spinner.buttonDisabledArrowColor	Color
@@ -87,6 +90,7 @@ public class FlatSpinnerUI
 	protected Color disabledBorderColor;
 	protected Color disabledBackground;
 	protected Color disabledForeground;
+	protected Color focusedBackground;
 	protected Color buttonBackground;
 	protected Color buttonArrowColor;
 	protected Color buttonDisabledArrowColor;
@@ -112,15 +116,13 @@ public class FlatSpinnerUI
 		disabledBorderColor = UIManager.getColor( "Component.disabledBorderColor" );
 		disabledBackground = UIManager.getColor( "Spinner.disabledBackground" );
 		disabledForeground = UIManager.getColor( "Spinner.disabledForeground" );
+		focusedBackground = UIManager.getColor( "Spinner.focusedBackground" );
 		buttonBackground = UIManager.getColor( "Spinner.buttonBackground" );
 		buttonArrowColor = UIManager.getColor( "Spinner.buttonArrowColor" );
 		buttonDisabledArrowColor = UIManager.getColor( "Spinner.buttonDisabledArrowColor" );
 		buttonHoverArrowColor = UIManager.getColor( "Spinner.buttonHoverArrowColor" );
 		buttonPressedArrowColor = UIManager.getColor( "Spinner.buttonPressedArrowColor" );
 		padding = UIManager.getInsets( "Spinner.padding" );
-
-		// scale
-		padding = scale( padding );
 
 		MigLayoutVisualPadding.install( spinner );
 	}
@@ -133,6 +135,7 @@ public class FlatSpinnerUI
 		disabledBorderColor = null;
 		disabledBackground = null;
 		disabledForeground = null;
+		focusedBackground = null;
 		buttonBackground = null;
 		buttonArrowColor = null;
 		buttonDisabledArrowColor = null;
@@ -179,6 +182,7 @@ public class FlatSpinnerUI
 		if( textField != null )
 			textField.setOpaque( false );
 
+		updateEditorPadding();
 		updateEditorColors();
 		return editor;
 	}
@@ -189,6 +193,8 @@ public class FlatSpinnerUI
 
 		removeEditorFocusListener( oldEditor );
 		addEditorFocusListener( newEditor );
+
+		updateEditorPadding();
 		updateEditorColors();
 	}
 
@@ -202,6 +208,12 @@ public class FlatSpinnerUI
 		JTextField textField = getEditorTextField( editor );
 		if( textField != null )
 			textField.removeFocusListener( getHandler() );
+	}
+
+	private void updateEditorPadding() {
+		JTextField textField = getEditorTextField( spinner.getEditor() );
+		if( textField != null )
+			textField.putClientProperty( FlatClientProperties.TEXT_FIELD_PADDING, padding );
 	}
 
 	private void updateEditorColors() {
@@ -221,10 +233,34 @@ public class FlatSpinnerUI
 			: null;
 	}
 
+	/**
+	 * @since 1.3
+	 */
+	public static boolean isPermanentFocusOwner( JSpinner spinner ) {
+		if( FlatUIUtils.isPermanentFocusOwner( spinner ) )
+			return true;
+
+		JTextField textField = getEditorTextField( spinner.getEditor() );
+		return (textField != null)
+			? FlatUIUtils.isPermanentFocusOwner( textField )
+			: false;
+	}
+
 	protected Color getBackground( boolean enabled ) {
-		return enabled
-			? spinner.getBackground()
-			: (isIntelliJTheme ? FlatUIUtils.getParentBackground( spinner ) : disabledBackground);
+		if( enabled ) {
+			Color background = spinner.getBackground();
+
+			// always use explicitly set color
+			if( !(background instanceof UIResource) )
+				return background;
+
+			// focused
+			if( focusedBackground != null && isPermanentFocusOwner( spinner ) )
+				return focusedBackground;
+
+			return background;
+		} else
+			return isIntelliJTheme ? FlatUIUtils.getParentBackground( spinner ) : disabledBackground;
 	}
 
 	protected Color getForeground( boolean enabled ) {
@@ -250,7 +286,7 @@ public class FlatSpinnerUI
 		FlatArrowButton button = new FlatArrowButton( direction, arrowType, buttonArrowColor,
 			buttonDisabledArrowColor, buttonHoverArrowColor, null, buttonPressedArrowColor, null );
 		button.setName( name );
-		button.setYOffset( (direction == SwingConstants.NORTH) ? 1 : -1 );
+		button.setYOffset( (direction == SwingConstants.NORTH) ? 1.25f : -1.25f );
 		if( direction == SwingConstants.NORTH )
 			installNextButtonListeners( button );
 		else
@@ -344,6 +380,7 @@ public class FlatSpinnerUI
 		@Override
 		public Dimension preferredLayoutSize( Container parent ) {
 			Insets insets = parent.getInsets();
+			Insets padding = scale( FlatSpinnerUI.this.padding );
 			Dimension editorSize = (editor != null) ? editor.getPreferredSize() : new Dimension( 0, 0 );
 
 			// the arrows width is the same as the inner height so that the arrows area is square
@@ -368,15 +405,19 @@ public class FlatSpinnerUI
 
 			if( nextButton == null && previousButton == null ) {
 				if( editor != null )
-					editor.setBounds( FlatUIUtils.subtractInsets( r, padding ) );
+					editor.setBounds( r );
 				return;
 			}
 
 			Rectangle editorRect = new Rectangle( r );
 			Rectangle buttonsRect = new Rectangle( r );
 
+			// limit buttons width to height of a raw spinner (without insets)
+			FontMetrics fm = spinner.getFontMetrics( spinner.getFont() );
+			int maxButtonWidth = fm.getHeight() + scale( padding.top ) + scale( padding.bottom );
+
 			// make button area square (if spinner has preferred height)
-			int buttonsWidth = parent.getPreferredSize().height - insets.top - insets.bottom;
+			int buttonsWidth = Math.min( parent.getPreferredSize().height - insets.top - insets.bottom, maxButtonWidth );
 			buttonsRect.width = buttonsWidth;
 
 			if( parent.getComponentOrientation().isLeftToRight() ) {
@@ -388,7 +429,7 @@ public class FlatSpinnerUI
 			}
 
 			if( editor != null )
-				editor.setBounds( FlatUIUtils.subtractInsets( editorRect, padding ) );
+				editor.setBounds( editorRect );
 
 			int nextHeight = (buttonsRect.height / 2) + (buttonsRect.height % 2); // round up
 			if( nextButton != null )
@@ -405,6 +446,7 @@ public class FlatSpinnerUI
 
 		@Override
 		public void focusGained( FocusEvent e ) {
+			// necessary to update focus border
 			spinner.repaint();
 
 			// if spinner gained focus, transfer it to the editor text field
@@ -417,6 +459,7 @@ public class FlatSpinnerUI
 
 		@Override
 		public void focusLost( FocusEvent e ) {
+			// necessary to update focus border
 			spinner.repaint();
 		}
 

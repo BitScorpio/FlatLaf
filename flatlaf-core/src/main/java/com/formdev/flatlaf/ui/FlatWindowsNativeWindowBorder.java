@@ -25,6 +25,8 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.geom.AffineTransform;
+import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -289,6 +291,7 @@ class FlatWindowsNativeWindowBorder
 	//---- class WndProc ------------------------------------------------------
 
 	private class WndProc
+		implements PropertyChangeListener
 	{
 		// WM_NCHITTEST mouse position codes
 		private static final int
@@ -308,30 +311,41 @@ class FlatWindowsNativeWindowBorder
 			this.window = window;
 
 			hwnd = installImpl( window );
+			if( hwnd == 0 )
+				return;
 
 			// remove the OS window title bar
-			if( window instanceof JFrame && ((JFrame)window).getExtendedState() != 0 ) {
-				// In case that the frame should be maximized or minimized immediately
-				// when showing, then it is necessary to defer ::SetWindowPos() invocation.
-				// Otherwise the frame will not be maximized or minimized.
-				// This occurs only if frame.pack() was no invoked.
-				EventQueue.invokeLater( () -> {
-					updateFrame( hwnd );
-				});
-			} else
-				updateFrame( hwnd );
+			updateFrame( hwnd, (window instanceof JFrame) ? ((JFrame)window).getExtendedState() : 0 );
+
+			// set window background (used when resizing window)
+			updateWindowBackground();
+			window.addPropertyChangeListener( "background", this );
 		}
 
 		void uninstall() {
+			window.removePropertyChangeListener( "background", this );
+
 			uninstallImpl( hwnd );
 
 			// cleanup
 			window = null;
 		}
 
+		@Override
+		public void propertyChange( PropertyChangeEvent e ) {
+			updateWindowBackground();
+		}
+
+		private void updateWindowBackground() {
+			Color bg = window.getBackground();
+			if( bg != null )
+				setWindowBackground( hwnd, bg.getRed(), bg.getGreen(), bg.getBlue() );
+		}
+
 		private native long installImpl( Window window );
 		private native void uninstallImpl( long hwnd );
-		private native void updateFrame( long hwnd );
+		private native void updateFrame( long hwnd, int state );
+		private native void setWindowBackground( long hwnd, int r, int g, int b );
 		private native void showWindow( long hwnd, int cmd );
 
 		// invoked from native code

@@ -32,9 +32,14 @@ import java.beans.PropertyChangeListener;
 import java.io.File;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.MissingResourceException;
 import java.util.Properties;
+import java.util.ResourceBundle;
 import java.util.ServiceLoader;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -54,6 +59,7 @@ import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.plaf.ColorUIResource;
 import javax.swing.plaf.FontUIResource;
+import javax.swing.plaf.IconUIResource;
 import javax.swing.plaf.UIResource;
 import javax.swing.plaf.basic.BasicLookAndFeel;
 import javax.swing.text.StyleContext;
@@ -61,9 +67,11 @@ import javax.swing.text.html.HTMLEditorKit;
 import com.formdev.flatlaf.ui.FlatNativeWindowBorder;
 import com.formdev.flatlaf.ui.FlatPopupFactory;
 import com.formdev.flatlaf.ui.FlatRootPaneUI;
+import com.formdev.flatlaf.ui.FlatUIUtils;
 import com.formdev.flatlaf.util.GrayFilter;
 import com.formdev.flatlaf.util.LoggingFacade;
 import com.formdev.flatlaf.util.MultiResolutionImageSupport;
+import com.formdev.flatlaf.util.StringUtils;
 import com.formdev.flatlaf.util.SystemInfo;
 import com.formdev.flatlaf.util.UIScale;
 
@@ -90,6 +98,7 @@ public abstract class FlatLaf
 	private MnemonicHandler mnemonicHandler;
 
 	private Consumer<UIDefaults> postInitialization;
+	private List<Function<Object, Object>> uiDefaultsGetters;
 
 	/**
 	 * Sets the application look and feel to the given LaF
@@ -189,8 +198,10 @@ public abstract class FlatLaf
 
 	@Override
 	public Icon getDisabledIcon( JComponent component, Icon icon ) {
-		if( icon instanceof DisabledIconProvider )
-			return ((DisabledIconProvider)icon).getDisabledIcon();
+		if( icon instanceof DisabledIconProvider ) {
+			Icon disabledIcon = ((DisabledIconProvider)icon).getDisabledIcon();
+			return !(disabledIcon instanceof UIResource) ? new IconUIResource( disabledIcon ) : disabledIcon;
+		}
 
 		if( icon instanceof ImageIcon ) {
 			Object grayFilter = UIManager.get( "Component.grayFilter" );
@@ -346,14 +357,21 @@ public abstract class FlatLaf
 
 	@Override
 	public UIDefaults getDefaults() {
-		UIDefaults defaults = super.getDefaults();
+		// use larger initial capacity to avoid resizing UI defaults hash table
+		// (from 610 to 1221 to 2443 entries) and to save some memory
+		UIDefaults defaults = new FlatUIDefaults( 1500, 0.75f );
+
+		// initialize basic defaults (see super.getDefaults())
+		initClassDefaults( defaults );
+		initSystemColorDefaults( defaults );
+		initComponentDefaults( defaults );
 
 		// add flag that indicates whether the LaF is light or dark
 		// (can be queried without using FlatLaf API)
 		defaults.put( "laf.dark", isDark() );
 
-		// add resource bundle for localized texts
-		defaults.addResourceBundle( "com.formdev.flatlaf.resources.Bundle" );
+		// init resource bundle for localized texts
+		initResourceBundle( defaults, "com.formdev.flatlaf.resources.Bundle" );
 
 		// initialize some defaults (for overriding) that are used in UI delegates,
 		// but are not set in BasicLookAndFeel
@@ -447,6 +465,45 @@ public abstract class FlatLaf
 
 	protected Properties getAdditionalDefaults() {
 		return null;
+	}
+
+	private void initResourceBundle( UIDefaults defaults, String bundleName ) {
+		// add resource bundle for localized texts
+		defaults.addResourceBundle( bundleName );
+
+		// Check whether Swing can not load the FlatLaf resource bundle,
+		// which can happen in applications that use some plugin system
+		// and load FlatLaf in a plugin that uses its own classloader.
+		// (e.g. Apache NetBeans)
+		if( defaults.get( "FileChooser.fileNameHeaderText" ) != null )
+			return;
+
+		// load FlatLaf resource bundle and add content to defaults
+		try {
+			ResourceBundle bundle = ResourceBundle.getBundle( bundleName, defaults.getDefaultLocale() );
+
+			Enumeration<String> keys = bundle.getKeys();
+			while( keys.hasMoreElements() ) {
+				String key = keys.nextElement();
+				String value = bundle.getString( key );
+
+				String baseKey = StringUtils.removeTrailing( key, ".textAndMnemonic" );
+				if( baseKey != key ) {
+					String text = value.replace( "&", "" );
+					String mnemonic = null;
+					int index = value.indexOf( '&' );
+					if( index >= 0 )
+						mnemonic = Integer.toString( Character.toUpperCase( value.charAt( index + 1 ) ) );
+
+					defaults.put( baseKey + "Text", text );
+					if( mnemonic != null )
+						defaults.put( baseKey + "Mnemonic", mnemonic );
+				} else
+					defaults.put( key, value );
+			}
+		} catch( MissingResourceException ex ) {
+			LoggingFacade.INSTANCE.logSevere( null, ex );
+		}
 	}
 
 	private void initFonts( UIDefaults defaults ) {
@@ -561,6 +618,8 @@ public abstract class FlatLaf
 			defaults.put( RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON );
 		} else if( SystemInfo.isJava_9_orLater ) {
 			Object desktopHints = Toolkit.getDefaultToolkit().getDesktopProperty( DESKTOPFONTHINTS );
+			if( desktopHints == null )
+				desktopHints = fallbackAATextInfo();
 			if( desktopHints instanceof Map ) {
 				@SuppressWarnings( "unchecked" )
 				Map<Object, Object> hints = (Map<Object, Object>) desktopHints;
@@ -583,7 +642,50 @@ public abstract class FlatLaf
 				Object value = Class.forName( "sun.swing.SwingUtilities2$AATextInfo" )
 					.getMethod( "getAATextInfo", boolean.class )
 					.invoke( null, true );
+				if( value == null )
+					value = fallbackAATextInfo();
 				defaults.put( key, value );
+			} catch( Exception ex ) {
+				LoggingFacade.INSTANCE.logSevere( null, ex );
+				throw new RuntimeException( ex );
+			}
+		}
+	}
+
+	private Object fallbackAATextInfo() {
+		// do nothing if explicitly overridden
+		if( System.getProperty( "awt.useSystemAAFontSettings" ) != null )
+			return null;
+
+		Object aaHint = null;
+		Integer lcdContrastHint = null;
+
+		if( SystemInfo.isLinux ) {
+			// see sun.awt.UNIXToolkit.getDesktopAAHints()
+			Toolkit toolkit = Toolkit.getDefaultToolkit();
+			if( toolkit.getDesktopProperty( "gnome.Xft/Antialias" ) == null &&
+				toolkit.getDesktopProperty( "fontconfig/Antialias" ) == null )
+			{
+				// no Gnome or KDE Desktop properties available
+				// --> enable antialiasing
+				aaHint = RenderingHints.VALUE_TEXT_ANTIALIAS_ON;
+			}
+		}
+
+		if( aaHint == null )
+			return null;
+
+		if( SystemInfo.isJava_9_orLater ) {
+			Map<Object, Object> hints = new HashMap<>();
+			hints.put( RenderingHints.KEY_TEXT_ANTIALIASING, aaHint );
+			hints.put( RenderingHints.KEY_TEXT_LCD_CONTRAST, lcdContrastHint );
+			return hints;
+		} else {
+			// Java 8
+			try {
+				return Class.forName( "sun.swing.SwingUtilities2$AATextInfo" )
+					.getConstructor( Object.class, Integer.class )
+					.newInstance( aaHint, lcdContrastHint );
 			} catch( Exception ex ) {
 				LoggingFacade.INSTANCE.logSevere( null, ex );
 				throw new RuntimeException( ex );
@@ -820,6 +922,104 @@ public abstract class FlatLaf
 	@Override
 	public final int hashCode() {
 		return super.hashCode();
+	}
+
+	/**
+	 * Registers a UI defaults getter function that is invoked before the standard getter.
+	 * This allows using different UI defaults for special purposes
+	 * (e.g. using multiple themes at the same time).
+	 *
+	 * @see #unregisterUIDefaultsGetter(Function)
+	 * @see #runWithUIDefaultsGetter(Function, Runnable)
+	 * @since 1.6
+	 */
+	public void registerUIDefaultsGetter( Function<Object, Object> uiDefaultsGetter ) {
+		if( uiDefaultsGetters == null )
+			uiDefaultsGetters = new ArrayList<>();
+
+		uiDefaultsGetters.remove( uiDefaultsGetter );
+		uiDefaultsGetters.add( uiDefaultsGetter );
+
+		// disable shared UIs
+		FlatUIUtils.setUseSharedUIs( false );
+	}
+
+	/**
+	 * Unregisters a UI defaults getter function that was invoked before the standard getter.
+	 *
+	 * @see #registerUIDefaultsGetter(Function)
+	 * @see #runWithUIDefaultsGetter(Function, Runnable)
+	 * @since 1.6
+	 */
+	public void unregisterUIDefaultsGetter( Function<Object, Object> uiDefaultsGetter ) {
+		if( uiDefaultsGetters == null )
+			return;
+
+		uiDefaultsGetters.remove( uiDefaultsGetter );
+
+		// enable shared UIs
+		if( uiDefaultsGetters.isEmpty() )
+			FlatUIUtils.setUseSharedUIs( true );
+	}
+
+	/**
+	 * Registers a UI defaults getter function that is invoked before the standard getter,
+	 * runs the given runnable and unregisters the UI defaults getter function again.
+	 * This allows using different UI defaults for special purposes
+	 * (e.g. using multiple themes at the same time).
+	 * If the current look and feel is not FlatLaf, then the getter is ignored and
+	 * the given runnable invoked.
+	 *
+	 * @see #registerUIDefaultsGetter(Function)
+	 * @see #unregisterUIDefaultsGetter(Function)
+	 * @since 1.6
+	 */
+	public static void runWithUIDefaultsGetter( Function<Object, Object> uiDefaultsGetter, Runnable runnable ) {
+		LookAndFeel laf = UIManager.getLookAndFeel();
+		if( laf instanceof FlatLaf ) {
+			((FlatLaf)laf).registerUIDefaultsGetter( uiDefaultsGetter );
+			try {
+				runnable.run();
+			} finally {
+				((FlatLaf)laf).unregisterUIDefaultsGetter( uiDefaultsGetter );
+			}
+		} else
+			runnable.run();
+	}
+
+	//---- class FlatUIDefaults -----------------------------------------------
+
+	private class FlatUIDefaults
+		extends UIDefaults
+	{
+		FlatUIDefaults( int initialCapacity, float loadFactor ) {
+			super( initialCapacity, loadFactor );
+		}
+
+		@Override
+		public Object get( Object key ) {
+			Object value = getValue( key );
+			return (value != null) ? value : super.get( key );
+		}
+
+		@Override
+		public Object get( Object key, Locale l ) {
+			Object value = getValue( key );
+			return (value != null) ? value : super.get( key, l );
+		}
+
+		private Object getValue( Object key ) {
+			if( uiDefaultsGetters == null )
+				return null;
+
+			for( int i = uiDefaultsGetters.size() - 1; i >= 0; i-- ) {
+				Object value = uiDefaultsGetters.get( i ).apply( key );
+				if( value != null )
+					return value;
+			}
+
+			return null;
+		}
 	}
 
 	//---- class ActiveFont ---------------------------------------------------

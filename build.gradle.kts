@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-val releaseVersion = "1.1.2"
-val developmentVersion = "1.2-SNAPSHOT"
+val releaseVersion = "1.5"
+val developmentVersion = "1.6-SNAPSHOT"
 
 version = if( java.lang.Boolean.getBoolean( "release" ) ) releaseVersion else developmentVersion
 
@@ -47,19 +47,35 @@ allprojects {
 			targetCompatibility = "1.8"
 
 			options.encoding = "ISO-8859-1"
+			options.isDeprecation = false
 		}
 
 		withType<Jar>().configureEach {
 			// manifest for all created JARs
-			manifest.attributes(mapOf(
+			manifest.attributes(
 				"Implementation-Vendor" to "FormDev Software GmbH",
 				"Implementation-Copyright" to "Copyright (C) 2019-${java.time.LocalDate.now().year} FormDev Software GmbH. All rights reserved.",
-				"Implementation-Version" to project.version))
+				"Implementation-Version" to project.version
+			)
 
 			// add META-INF/LICENSE to all created JARs
-			from("${rootDir}/LICENSE") {
-				into("META-INF")
+			from( "${rootDir}/LICENSE" ) {
+				into( "META-INF" )
 			}
+		}
+
+		withType<Javadoc>().configureEach {
+			options {
+				this as StandardJavadocDocletOptions
+
+				title = "${project.name} $version"
+				header = title
+				isUse = true
+				tags = listOf( "uiDefault", "clientProperty" )
+				addStringOption( "Xdoclint:all,-missing", "-Xdoclint:all,-missing" )
+				links( "https://docs.oracle.com/en/java/javase/11/docs/api/" )
+			}
+			isFailOnError = false
 		}
 	}
 }

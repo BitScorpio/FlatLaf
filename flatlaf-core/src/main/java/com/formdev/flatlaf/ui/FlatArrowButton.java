@@ -48,8 +48,8 @@ public class FlatArrowButton
 	protected final Color pressedBackground;
 
 	private int arrowWidth = DEFAULT_ARROW_WIDTH;
-	private int xOffset = 0;
-	private int yOffset = 0;
+	private float xOffset = 0;
+	private float yOffset = 0;
 
 	private boolean hover;
 	private boolean pressed;
@@ -117,19 +117,19 @@ public class FlatArrowButton
 		return pressed;
 	}
 
-	public int getXOffset() {
+	public float getXOffset() {
 		return xOffset;
 	}
 
-	public void setXOffset( int xOffset ) {
+	public void setXOffset( float xOffset ) {
 		this.xOffset = xOffset;
 	}
 
-	public int getYOffset() {
+	public float getYOffset() {
 		return yOffset;
 	}
 
-	public void setYOffset( int yOffset ) {
+	public void setYOffset( float yOffset ) {
 		this.yOffset = yOffset;
 	}
 
@@ -139,6 +139,21 @@ public class FlatArrowButton
 
 	protected Color deriveForeground( Color foreground ) {
 		return FlatUIUtils.deriveColor( foreground, this.foreground );
+	}
+
+	/**
+	 * Returns the color used to paint the arrow.
+	 *
+	 * @since 1.2
+	 */
+	protected Color getArrowColor() {
+		return isEnabled()
+			? (pressedForeground != null && isPressed()
+				? pressedForeground
+				: (hoverForeground != null && isHover()
+					? hoverForeground
+					: foreground))
+			: disabledForeground;
 	}
 
 	@Override
@@ -170,13 +185,7 @@ public class FlatArrowButton
 		}
 
 		// paint arrow
-		g.setColor( deriveForeground( isEnabled()
-			? (pressedForeground != null && isPressed()
-				? pressedForeground
-				: (hoverForeground != null && isHover()
-					? hoverForeground
-					: foreground))
-			: disabledForeground ) );
+		g.setColor( deriveForeground( getArrowColor() ) );
 		paintArrow( (Graphics2D) g );
 
 		FlatUIUtils.resetRenderingHints( g, oldRenderingHints );

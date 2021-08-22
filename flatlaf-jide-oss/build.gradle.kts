@@ -23,23 +23,12 @@ dependencies {
 	implementation( project( ":flatlaf-core" ) )
 
 	// use compileOnly() because there are various JIDE libraries available on Maven Central
-	compileOnly( "com.formdev:jide-oss:3.7.11.1" )
+	compileOnly( "com.formdev:jide-oss:3.7.12" )
 }
 
 java {
 	withSourcesJar()
 	withJavadocJar()
-}
-
-tasks {
-	javadoc {
-		options {
-			this as StandardJavadocDocletOptions
-			use( true )
-			tags = listOf( "uiDefault", "clientProperty" )
-		}
-		isFailOnError = false
-	}
 }
 
 flatlafPublish {

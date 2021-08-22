@@ -69,6 +69,7 @@ public class FlatUIUtils
 {
 	public static final boolean MAC_USE_QUARTZ = Boolean.getBoolean( "apple.awt.graphics.UseQuartz" );
 
+	private static boolean useSharedUIs = true;
 	private static WeakHashMap<LookAndFeel, IdentityHashMap<Object, ComponentUI>> sharedUIinstances = new WeakHashMap<>();
 
 	public static Rectangle addInsets( Rectangle r, Insets insets ) {
@@ -94,6 +95,11 @@ public class FlatUIUtils
 	}
 
 	public static Insets addInsets( Insets insets1, Insets insets2 ) {
+		if( insets1 == null )
+			return insets2;
+		if( insets2 == null )
+			return insets1;
+
 		return new Insets(
 			insets1.top + insets2.top,
 			insets1.left + insets2.left,
@@ -660,7 +666,7 @@ public class FlatUIUtils
 	 * @since 1.1
 	 */
 	public static void paintArrow( Graphics2D g, int x, int y, int width, int height,
-		int direction, boolean chevron, int arrowSize, int xOffset, int yOffset )
+		int direction, boolean chevron, int arrowSize, float xOffset, float yOffset )
 	{
 		// compute arrow width/height
 		int aw = UIScale.scale( arrowSize + (chevron ? 0 : 1) );
@@ -679,8 +685,10 @@ public class FlatUIUtils
 		int extra = chevron ? 1 : 0;
 
 		// compute arrow location
-		int ax = x + Math.round( ((width - (aw + extra)) / 2f) + UIScale.scale( (float) xOffset ) );
-		int ay = y + Math.round( ((height - (ah + extra)) / 2f) + UIScale.scale( (float) yOffset ) );
+		float ox = ((width - (aw + extra)) / 2f) + UIScale.scale( xOffset );
+		float oy = ((height - (ah + extra)) / 2f) + UIScale.scale( yOffset );
+		int ax = x + ((direction == SwingConstants.WEST) ? -Math.round( -ox ) : Math.round( ox ));
+		int ay = y + ((direction == SwingConstants.NORTH) ? -Math.round( -oy ) : Math.round( oy ));
 
 		// paint arrow
 		g.translate( ax, ay );
@@ -819,6 +827,27 @@ debug*/
 	}
 
 	/**
+	 * Returns whether shared UI delegates are used.
+	 *
+	 * @since 1.6
+	 */
+	public static boolean isUseSharedUIs() {
+		return useSharedUIs;
+	}
+
+	/**
+	 * Specifies whether shared UI delegates are used.
+	 * This does not change already existing UI delegates.
+	 *
+	 * @since 1.6
+	 */
+	public static boolean setUseSharedUIs( boolean useSharedUIs ) {
+		boolean old = FlatUIUtils.useSharedUIs;
+		FlatUIUtils.useSharedUIs = useSharedUIs;
+		return old;
+	}
+
+	/**
 	 * Creates a shared component UI for the given key and the current Laf.
 	 * Each Laf instance has its own shared component UI instance.
 	 * <p>
@@ -826,6 +855,9 @@ debug*/
 	 * may use multiple Laf instances at the same time.
 	 */
 	public static ComponentUI createSharedUI( Object key, Supplier<ComponentUI> newInstanceSupplier ) {
+		if( !useSharedUIs )
+			return newInstanceSupplier.get();
+
 		return sharedUIinstances
 			.computeIfAbsent( UIManager.getLookAndFeel(), k -> new IdentityHashMap<>() )
 			.computeIfAbsent( key, k -> newInstanceSupplier.get() );
@@ -837,19 +869,23 @@ debug*/
 		implements FocusListener
 	{
 		private final Component repaintComponent;
+		private final Predicate<Component> repaintCondition;
 
-		public RepaintFocusListener( Component repaintComponent ) {
+		public RepaintFocusListener( Component repaintComponent, Predicate<Component> repaintCondition ) {
 			this.repaintComponent = repaintComponent;
+			this.repaintCondition = repaintCondition;
 		}
 
 		@Override
 		public void focusGained( FocusEvent e ) {
-			repaintComponent.repaint();
+			if( repaintCondition == null || repaintCondition.test( repaintComponent ) )
+				repaintComponent.repaint();
 		}
 
 		@Override
 		public void focusLost( FocusEvent e ) {
-			repaintComponent.repaint();
+			if( repaintCondition == null || repaintCondition.test( repaintComponent ) )
+				repaintComponent.repaint();
 		}
 	}
 }

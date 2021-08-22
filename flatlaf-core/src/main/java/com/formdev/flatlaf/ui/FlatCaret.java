@@ -18,10 +18,13 @@ package com.formdev.flatlaf.ui;
 
 import static com.formdev.flatlaf.FlatClientProperties.*;
 import java.awt.EventQueue;
+import java.awt.Insets;
+import java.awt.Rectangle;
 import java.awt.event.FocusEvent;
 import java.awt.event.MouseEvent;
 import javax.swing.JFormattedTextField;
 import javax.swing.plaf.UIResource;
+import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultCaret;
 import javax.swing.text.Document;
 import javax.swing.text.JTextComponent;
@@ -59,6 +62,19 @@ public class FlatCaret
 			if( length > 0 )
 				setDot( length );
 		}
+	}
+
+	@Override
+	protected void adjustVisibility( Rectangle nloc ) {
+		JTextComponent c = getComponent();
+		if( c != null && c.getUI() instanceof FlatTextFieldUI ) {
+			Insets padding = ((FlatTextFieldUI)c.getUI()).getPadding();
+			if( padding != null ) {
+				nloc.x -= padding.left;
+				nloc.y -= padding.top;
+			}
+		}
+		super.adjustVisibility( nloc );
 	}
 
 	@Override
@@ -125,6 +141,25 @@ public class FlatCaret
 		} else {
 			setDot( 0 );
 			moveDot( doc.getLength() );
+		}
+	}
+
+	/**
+	 * @since 1.4
+	 */
+	public void scrollCaretToVisible() {
+		JTextComponent c = getComponent();
+		if( c == null || c.getUI() == null )
+			return;
+
+		try {
+			Rectangle loc = c.getUI().modelToView( c, getDot(), getDotBias() );
+			if( loc != null ) {
+				adjustVisibility( loc );
+				damage( loc );
+			}
+		} catch( BadLocationException ex ) {
+			// ignore
 		}
 	}
 }

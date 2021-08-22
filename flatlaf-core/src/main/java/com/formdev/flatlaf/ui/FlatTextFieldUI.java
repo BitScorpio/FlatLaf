@@ -24,8 +24,10 @@ import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Insets;
+import java.awt.Rectangle;
 import java.awt.event.FocusListener;
 import java.beans.PropertyChangeEvent;
+import java.util.Objects;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JSpinner;
@@ -40,6 +42,7 @@ import javax.swing.text.JTextComponent;
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.util.HiDPIUtils;
 import com.formdev.flatlaf.util.JavaCompatibility;
+import com.formdev.flatlaf.util.UIScale;
 
 /**
  * Provides the Flat LaF UI delegate for {@link javax.swing.JTextField}.
@@ -64,6 +67,7 @@ import com.formdev.flatlaf.util.JavaCompatibility;
  * @uiDefault Component.minimumWidth			int
  * @uiDefault Component.isIntelliJTheme			boolean
  * @uiDefault TextField.placeholderForeground	Color
+ * @uiDefault TextField.focusedBackground		Color	optional
  * @uiDefault TextComponent.selectAllOnFocusPolicy	String	never, once (default) or always
  * @uiDefault TextComponent.selectAllOnMouseClick	boolean
  *
@@ -75,6 +79,9 @@ public class FlatTextFieldUI
 	protected int minimumWidth;
 	protected boolean isIntelliJTheme;
 	protected Color placeholderForeground;
+	protected Color focusedBackground;
+
+	private Insets defaultMargin;
 
 	private FocusListener focusListener;
 
@@ -90,6 +97,9 @@ public class FlatTextFieldUI
 		minimumWidth = UIManager.getInt( "Component.minimumWidth" );
 		isIntelliJTheme = UIManager.getBoolean( "Component.isIntelliJTheme" );
 		placeholderForeground = UIManager.getColor( prefix + ".placeholderForeground" );
+		focusedBackground = UIManager.getColor( prefix + ".focusedBackground" );
+
+		defaultMargin = UIManager.getInsets( prefix + ".margin" );
 
 		LookAndFeel.installProperty( getComponent(), "opaque", false );
 
@@ -101,6 +111,7 @@ public class FlatTextFieldUI
 		super.uninstallDefaults();
 
 		placeholderForeground = null;
+		focusedBackground = null;
 
 		MigLayoutVisualPadding.uninstall( getComponent() );
 	}
@@ -109,7 +120,8 @@ public class FlatTextFieldUI
 	protected void installListeners() {
 		super.installListeners();
 
-		focusListener = new FlatUIUtils.RepaintFocusListener( getComponent() );
+		// necessary to update focus border and background
+		focusListener = new FlatUIUtils.RepaintFocusListener( getComponent(), null );
 		getComponent().addFocusListener( focusListener );
 	}
 
@@ -137,6 +149,7 @@ public class FlatTextFieldUI
 		switch( e.getPropertyName() ) {
 			case FlatClientProperties.PLACEHOLDER_TEXT:
 			case FlatClientProperties.COMPONENT_ROUND_RECT:
+			case FlatClientProperties.TEXT_FIELD_PADDING:
 				c.repaint();
 				break;
 
@@ -148,8 +161,8 @@ public class FlatTextFieldUI
 
 	@Override
 	protected void paintSafely( Graphics g ) {
-		paintBackground( g, getComponent(), isIntelliJTheme );
-		paintPlaceholder( g, getComponent(), placeholderForeground );
+		paintBackground( g, getComponent(), isIntelliJTheme, focusedBackground );
+		paintPlaceholder( g );
 
 		super.paintSafely( HiDPIUtils.createGraphicsTextYCorrection( (Graphics2D) g ) );
 	}
@@ -159,7 +172,7 @@ public class FlatTextFieldUI
 		// background is painted elsewhere
 	}
 
-	static void paintBackground( Graphics g, JTextComponent c, boolean isIntelliJTheme ) {
+	static void paintBackground( Graphics g, JTextComponent c, boolean isIntelliJTheme, Color focusedBackground ) {
 		// do not paint background if:
 		//   - not opaque and
 		//   - border is not a flat border and
@@ -180,19 +193,34 @@ public class FlatTextFieldUI
 		try {
 			FlatUIUtils.setRenderingHints( g2 );
 
-			Color background = c.getBackground();
-			g2.setColor( !(background instanceof UIResource)
-				? background
-				: (isIntelliJTheme && (!c.isEnabled() || !c.isEditable())
-					? FlatUIUtils.getParentBackground( c )
-					: background) );
+			g2.setColor( getBackground( c, isIntelliJTheme, focusedBackground ) );
 			FlatUIUtils.paintComponentBackground( g2, 0, 0, c.getWidth(), c.getHeight(), focusWidth, arc );
 		} finally {
 			g2.dispose();
 		}
 	}
 
-	static void paintPlaceholder( Graphics g, JTextComponent c, Color placeholderForeground ) {
+	static Color getBackground( JTextComponent c, boolean isIntelliJTheme, Color focusedBackground ) {
+		Color background = c.getBackground();
+
+		// always use explicitly set color
+		if( !(background instanceof UIResource) )
+			return background;
+
+		// focused
+		if( focusedBackground != null && FlatUIUtils.isPermanentFocusOwner( c ) )
+			return focusedBackground;
+
+		// for compatibility with IntelliJ themes
+		if( isIntelliJTheme && (!c.isEnabled() || !c.isEditable()) )
+			return FlatUIUtils.getParentBackground( c );
+
+		return background;
+	}
+
+	protected void paintPlaceholder( Graphics g ) {
+		JTextComponent c = getComponent();
+
 		// check whether text component is empty
 		if( c.getDocument().getLength() > 0 )
 			return;
@@ -207,16 +235,14 @@ public class FlatTextFieldUI
 			return;
 
 		// compute placeholder location
-		Insets insets = c.getInsets();
+		Rectangle r = getVisibleEditorRect();
 		FontMetrics fm = c.getFontMetrics( c.getFont() );
-		int x = insets.left;
-		int y = insets.top + fm.getAscent() + ((c.getHeight() - insets.top - insets.bottom - fm.getHeight()) / 2);
+		int y = r.y + fm.getAscent() + ((r.height - fm.getHeight()) / 2);
 
 		// paint placeholder
 		g.setColor( placeholderForeground );
-		String clippedPlaceholder = JavaCompatibility.getClippedString( jc, fm,
-				(String) placeholder, c.getWidth() - insets.left - insets.right );
-		FlatUIUtils.drawString( c, g, clippedPlaceholder, x, y );
+		String clippedPlaceholder = JavaCompatibility.getClippedString( c, fm, (String) placeholder, r.width );
+		FlatUIUtils.drawString( c, g, clippedPlaceholder, r.x, y );
 	}
 
 	@Override
@@ -229,9 +255,13 @@ public class FlatTextFieldUI
 		return applyMinimumWidth( c, super.getMinimumSize( c ), minimumWidth );
 	}
 
-	static Dimension applyMinimumWidth( JComponent c, Dimension size, int minimumWidth ) {
+	private Dimension applyMinimumWidth( JComponent c, Dimension size, int minimumWidth ) {
 		// do not apply minimum width if JTextField.columns is set
 		if( c instanceof JTextField && ((JTextField)c).getColumns() > 0 )
+			return size;
+
+		// do not apply minimum width if JTextComponent.margin is set
+		if( !hasDefaultMargins( c, defaultMargin ) )
 			return size;
 
 		// do not apply minimum width if used in combobox or spinner
@@ -245,5 +275,42 @@ public class FlatTextFieldUI
 		float focusWidth = FlatUIUtils.getBorderFocusWidth( c );
 		size.width = Math.max( size.width, scale( minimumWidth ) + Math.round( focusWidth * 2 ) );
 		return size;
+	}
+
+	static boolean hasDefaultMargins( JComponent c, Insets defaultMargin ) {
+		Insets margin = ((JTextComponent)c).getMargin();
+		return margin instanceof UIResource && Objects.equals( margin, defaultMargin );
+	}
+
+	@Override
+	protected Rectangle getVisibleEditorRect() {
+		Rectangle r = super.getVisibleEditorRect();
+		if( r != null ) {
+			// remove padding
+			Insets padding = getPadding();
+			if( padding != null ) {
+				r = FlatUIUtils.subtractInsets( r, padding );
+				r.width = Math.max( r.width, 0 );
+				r.height = Math.max( r.height, 0 );
+			}
+		}
+		return r;
+	}
+
+	/**
+	 * @since 1.4
+	 */
+	protected Insets getPadding() {
+		Object padding = getComponent().getClientProperty( FlatClientProperties.TEXT_FIELD_PADDING );
+		return (padding instanceof Insets) ? UIScale.scale( (Insets) padding ) : null;
+	}
+
+	/**
+	 * @since 1.4
+	 */
+	protected void scrollCaretToVisible() {
+		Caret caret = getComponent().getCaret();
+		if( caret instanceof FlatCaret )
+			((FlatCaret)caret).scrollCaretToVisible();
 	}
 }
