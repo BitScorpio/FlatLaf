@@ -19,17 +19,22 @@ package com.formdev.flatlaf.ui;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
-import java.awt.Graphics;
 import java.awt.GridBagConstraints;
-import java.awt.Insets;
+import java.beans.PropertyChangeListener;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.Icon;
 import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JRootPane;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
-import javax.swing.border.Border;
 import javax.swing.plaf.ComponentUI;
-import javax.swing.plaf.UIResource;
 import javax.swing.plaf.basic.BasicHTML;
 import javax.swing.plaf.basic.BasicOptionPaneUI;
+import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.util.SwingUtils;
 import com.formdev.flatlaf.util.UIScale;
 
 /**
@@ -75,6 +80,7 @@ import com.formdev.flatlaf.util.UIScale;
  *
  * <!-- FlatOptionPaneUI -->
  *
+ * @uiDefault OptionPane.showIcon					boolean
  * @uiDefault OptionPane.iconMessageGap				int
  * @uiDefault OptionPane.messagePadding				int
  * @uiDefault OptionPane.maxCharactersPerLine		int
@@ -84,10 +90,12 @@ import com.formdev.flatlaf.util.UIScale;
 public class FlatOptionPaneUI
 	extends BasicOptionPaneUI
 {
+	/** @since 2 */ protected boolean showIcon;
 	protected int iconMessageGap;
 	protected int messagePadding;
 	protected int maxCharactersPerLine;
 	private int focusWidth;
+	private boolean sameSizeButtons;
 
 	public static ComponentUI createUI( JComponent c ) {
 		return new FlatOptionPaneUI();
@@ -97,17 +105,30 @@ public class FlatOptionPaneUI
 	protected void installDefaults() {
 		super.installDefaults();
 
+		showIcon = UIManager.getBoolean( "OptionPane.showIcon" );
 		iconMessageGap = UIManager.getInt( "OptionPane.iconMessageGap" );
 		messagePadding = UIManager.getInt( "OptionPane.messagePadding" );
 		maxCharactersPerLine = UIManager.getInt( "OptionPane.maxCharactersPerLine" );
 		focusWidth = UIManager.getInt( "Component.focusWidth" );
+		sameSizeButtons = FlatUIUtils.getUIBoolean( "OptionPane.sameSizeButtons", true );
 	}
 
 	@Override
-	protected void installComponents() {
-		super.installComponents();
+	protected PropertyChangeListener createPropertyChangeListener() {
+		PropertyChangeListener superListener = super.createPropertyChangeListener();
+		return e -> {
+			superListener.propertyChange( e );
 
-		updateChildPanels( optionPane );
+			// hide window title bar icon
+			// (only if showIcon is false, otherwise the default behavior is used)
+			if( !showIcon && "ancestor".equals( e.getPropertyName() ) && e.getNewValue() != null ) {
+				JRootPane rootPane = SwingUtilities.getRootPane( optionPane );
+				if( rootPane != null &&
+					rootPane.getContentPane().getComponentCount() > 0 &&
+					rootPane.getContentPane().getComponent( 0 ) == optionPane )
+				  rootPane.putClientProperty( FlatClientProperties.TITLE_BAR_SHOW_ICON, false );
+			}
+		};
 	}
 
 	@Override
@@ -125,9 +146,16 @@ public class FlatOptionPaneUI
 	protected Container createMessageArea() {
 		Container messageArea = super.createMessageArea();
 
+		// use non-UIResource OptionPane.messageAreaBorder to avoid that it is replaced when switching LaF
+		// and make panel non-opaque for OptionPane.background
+		updateAreaPanel( messageArea );
+
+		// make known sub-panels non-opaque for OptionPane.background
+		updateKnownChildPanels( messageArea );
+
 		// set icon-message gap
 		if( iconMessageGap > 0 ) {
-			Component iconMessageSeparator = findByName( messageArea, "OptionPane.separator" );
+			Component iconMessageSeparator = SwingUtils.getComponentByName( messageArea, "OptionPane.separator" );
 			if( iconMessageSeparator != null )
 				iconMessageSeparator.setPreferredSize( new Dimension( UIScale.scale( iconMessageGap ), 1 ) );
 		}
@@ -138,6 +166,10 @@ public class FlatOptionPaneUI
 	@Override
 	protected Container createButtonArea() {
 		Container buttonArea = super.createButtonArea();
+
+		// use non-UIResource OptionPane.buttonAreaBorder to avoid that it is replaced when switching LaF
+		// and make panel non-opaque for OptionPane.background
+		updateAreaPanel( buttonArea );
 
 		// scale button padding and subtract focusWidth
 		if( buttonArea.getLayout() instanceof ButtonAreaLayout ) {
@@ -157,70 +189,69 @@ public class FlatOptionPaneUI
 			cons.insets.bottom = UIScale.scale( messagePadding );
 
 		// disable line wrapping for HTML
-		if( msg instanceof String && BasicHTML.isHTMLString( (String) msg ) )
-			maxll = Integer.MAX_VALUE;
+		if( msg != null &&
+			!(msg instanceof Component) &&
+			!(msg instanceof Object[]) &&
+			!(msg instanceof Icon) )
+		{
+			msg = msg.toString();
+			if( BasicHTML.isHTMLString( (String) msg ) )
+				maxll = Integer.MAX_VALUE;
+		}
+
+		// fix right-to-left alignment if super.addMessageComponents() breaks longer lines
+		// into multiple labels and puts them into a box that aligns them to the left
+		if( msg instanceof Box ) {
+			Box box = (Box) msg;
+			if( "OptionPane.verticalBox".equals( box.getName() ) &&
+				box.getLayout() instanceof BoxLayout &&
+				((BoxLayout)box.getLayout()).getAxis() == BoxLayout.Y_AXIS )
+			{
+				box.addPropertyChangeListener( "componentOrientation", e -> {
+					float alignX = box.getComponentOrientation().isLeftToRight() ? 0 : 1;
+					for( Component c : box.getComponents() ) {
+						if( c instanceof JLabel && "OptionPane.label".equals( c.getName() ) )
+							((JLabel)c).setAlignmentX( alignX );
+					}
+				} );
+			}
+		}
 
 		super.addMessageComponents( container, cons, msg, maxll, internallyCreated );
 	}
 
-	private void updateChildPanels( Container c ) {
+	private void updateAreaPanel( Container area ) {
+		if( !(area instanceof JPanel) )
+			return;
+
+		// use non-UIResource border to avoid that it is replaced when switching LaF
+		// and make panel non-opaque for OptionPane.background
+		JPanel panel = (JPanel) area;
+		panel.setBorder( FlatUIUtils.nonUIResource( panel.getBorder() ) );
+		panel.setOpaque( false );
+	}
+
+	private void updateKnownChildPanels( Container c ) {
 		for( Component child : c.getComponents() ) {
-			if( child instanceof JPanel ) {
-				JPanel panel = (JPanel)child;
-
-				// make sub-panel non-opaque for OptionPane.background
-				panel.setOpaque( false );
-
-				// use non-UIResource borders to avoid that they are replaced when switching LaF
-				Border border = panel.getBorder();
-				if( border instanceof UIResource )
-					panel.setBorder( new NonUIResourceBorder( border ) );
+			if( child instanceof JPanel && child.getName() != null ) {
+				switch( child.getName() ) {
+					case "OptionPane.realBody":
+					case "OptionPane.body":
+					case "OptionPane.separator":
+					case "OptionPane.break":
+						// make known sub-panels non-opaque for OptionPane.background
+						((JPanel)child).setOpaque( false );
+						break;
+				}
 			}
 
-			if( child instanceof Container ) {
-				updateChildPanels( (Container) child );
-			}
+			if( child instanceof Container )
+				updateKnownChildPanels( (Container) child );
 		}
 	}
 
-	private Component findByName( Container c, String name ) {
-		for( Component child : c.getComponents() ) {
-			if( name.equals( child.getName() ) )
-				return child;
-
-			if( child instanceof Container ) {
-				Component c2 = findByName( (Container) child, name );
-				if( c2 != null )
-					return c2;
-			}
-		}
-		return null;
-	}
-
-	//---- class NonUIResourceBorder ------------------------------------------
-
-	private static class NonUIResourceBorder
-		implements Border
-	{
-		private final Border delegate;
-
-		NonUIResourceBorder( Border delegate ) {
-			this.delegate = delegate;
-		}
-
-		@Override
-		public void paintBorder( Component c, Graphics g, int x, int y, int width, int height ) {
-			delegate.paintBorder( c, g, x, y, width, height );
-		}
-
-		@Override
-		public Insets getBorderInsets( Component c ) {
-			return delegate.getBorderInsets( c );
-		}
-
-		@Override
-		public boolean isBorderOpaque() {
-			return delegate.isBorderOpaque();
-		}
+	@Override
+	protected boolean getSizeButtonsToSameWidth() {
+		return sameSizeButtons;
 	}
 }

@@ -23,11 +23,14 @@ import java.awt.Dimension;
 import java.awt.Frame;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.IllegalComponentStateException;
 import java.awt.Insets;
 import java.awt.LayoutManager;
 import java.awt.LayoutManager2;
 import java.awt.Window;
+import java.awt.event.ComponentListener;
 import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
 import java.util.function.Function;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
@@ -61,6 +64,9 @@ import com.formdev.flatlaf.util.UIScale;
  *
  * <!-- FlatWindowResizer -->
  *
+ * @uiDefault RootPane.font									Font	unused
+ * @uiDefault RootPane.background							Color
+ * @uiDefault RootPane.foreground							Color	unused
  * @uiDefault RootPane.borderDragThickness					int
  * @uiDefault RootPane.cornerDragWidth						int
  * @uiDefault RootPane.honorFrameMinimumSizeOnResize		boolean
@@ -79,6 +85,8 @@ public class FlatRootPaneUI
 
 	private Object nativeWindowBorderData;
 	private LayoutManager oldLayout;
+	private ComponentListener macFullWindowContentListener;
+	private PropertyChangeListener macWindowBackgroundListener;
 
 	public static ComponentUI createUI( JComponent c ) {
 		return new FlatRootPaneUI();
@@ -96,6 +104,7 @@ public class FlatRootPaneUI
 			installBorder();
 
 		installNativeWindowBorder();
+		macInstallFullWindowContentSupport();
 	}
 
 	protected void installBorder() {
@@ -112,6 +121,7 @@ public class FlatRootPaneUI
 
 		uninstallNativeWindowBorder();
 		uninstallClientDecorations();
+		macUninstallFullWindowContentSupport();
 		rootPane = null;
 	}
 
@@ -119,8 +129,23 @@ public class FlatRootPaneUI
 	protected void installDefaults( JRootPane c ) {
 		super.installDefaults( c );
 
+		// Give the root pane useful background, foreground and font.
+		// Background is used for title bar and menu bar if native window decorations
+		// and unified background are enabled.
+		// Foreground and font are usually not used, but set for completeness.
+		// Not using LookAndFeel.installColorsAndFont() here because it will not work
+		// because the properties are null by default but inherit non-null values from parent.
+		if( !c.isBackgroundSet() || c.getBackground() instanceof UIResource )
+			c.setBackground( UIManager.getColor( "RootPane.background" ) );
+		if( !c.isForegroundSet() || c.getForeground() instanceof UIResource )
+			c.setForeground( UIManager.getColor( "RootPane.foreground" ) );
+		if( !c.isFontSet() || c.getFont() instanceof UIResource )
+			c.setFont( UIManager.getFont( "RootPane.font" ) );
+
 		// Update background color of JFrame or JDialog parent to avoid bad border
 		// on HiDPI screens when switching from light to dark Laf.
+		// Window background color is also used in native window decorations
+		// to fill background when window is initially shown or when resizing window.
 		// The background of JFrame is initialized in JFrame.frameInit() and
 		// the background of JDialog in JDialog.dialogInit(),
 		// but it was not updated when switching Laf.
@@ -131,29 +156,54 @@ public class FlatRootPaneUI
 				parent.setBackground( UIManager.getColor( "control" ) );
 		}
 
-		// enable dark window appearance on macOS when running in JetBrains Runtime
-		if( SystemInfo.isJetBrainsJVM && SystemInfo.isMacOS_10_14_Mojave_orLater )
-			c.putClientProperty( "jetbrains.awt.windowDarkAppearance", FlatLaf.isLafDark() );
+		macClearBackgroundForTranslucentWindow( c );
 	}
 
-	/**
-	 * @since 1.1.2
-	 */
+	@Override
+	protected void uninstallDefaults( JRootPane c ) {
+		super.uninstallDefaults( c );
+
+		// uninstall background, foreground and font because not all Lafs set them
+		if( c.isBackgroundSet() && c.getBackground() instanceof UIResource )
+			c.setBackground( null );
+		if( c.isForegroundSet() && c.getForeground() instanceof UIResource )
+			c.setForeground( null );
+		if( c.isFontSet() && c.getFont() instanceof UIResource )
+			c.setFont( null );
+	}
+
+	@Override
+	protected void installListeners( JRootPane root ) {
+		super.installListeners( root );
+
+		if( SystemInfo.isMacFullWindowContentSupported )
+			macFullWindowContentListener = FullWindowContentSupport.macInstallListeners( root );
+		macInstallWindowBackgroundListener( root );
+	}
+
+	@Override
+	protected void uninstallListeners( JRootPane root ) {
+		super.uninstallListeners( root );
+
+		if( SystemInfo.isMacFullWindowContentSupported ) {
+			FullWindowContentSupport.macUninstallListeners( root, macFullWindowContentListener );
+			macFullWindowContentListener = null;
+		}
+		macUninstallWindowBackgroundListener( root );
+	}
+
+	/** @since 1.1.2 */
 	protected void installNativeWindowBorder() {
 		nativeWindowBorderData = FlatNativeWindowBorder.install( rootPane );
 	}
 
-	/**
-	 * @since 1.1.2
-	 */
+	/** @since 1.1.2 */
 	protected void uninstallNativeWindowBorder() {
 		FlatNativeWindowBorder.uninstall( rootPane, nativeWindowBorderData );
 		nativeWindowBorderData = null;
 	}
 
-	/**
-	 * @since 1.1.2
-	 */
+	/** @since 1.1.2 */
 	public static void updateNativeWindowBorder( JRootPane rootPane ) {
 		RootPaneUI rui = rootPane.getUI();
 		if( !(rui instanceof FlatRootPaneUI) )
@@ -219,17 +269,139 @@ public class FlatRootPaneUI
 
 	// layer title pane under frame content layer to allow placing menu bar over title pane
 	protected final static Integer TITLE_PANE_LAYER = JLayeredPane.FRAME_CONTENT_LAYER - 1;
+	private final static Integer TITLE_PANE_MOUSE_LAYER = JLayeredPane.FRAME_CONTENT_LAYER - 2;
+	private final static Integer WINDOW_TOP_BORDER_LAYER = Integer.MAX_VALUE;
+
+	// for fullWindowContent mode, layer title pane over frame content layer to allow placing title bar buttons over content
+	/** @since 3.4 */
+	protected final static Integer TITLE_PANE_FULL_WINDOW_CONTENT_LAYER = JLayeredPane.FRAME_CONTENT_LAYER + 1;
+
+	private Integer getLayerForTitlePane() {
+		return isFullWindowContent( rootPane ) ? TITLE_PANE_FULL_WINDOW_CONTENT_LAYER : TITLE_PANE_LAYER;
+	}
 
 	protected void setTitlePane( FlatTitlePane newTitlePane ) {
 		JLayeredPane layeredPane = rootPane.getLayeredPane();
 
-		if( titlePane != null )
+		if( titlePane != null ) {
 			layeredPane.remove( titlePane );
+			layeredPane.remove( titlePane.mouseLayer );
+			if( titlePane.windowTopBorderLayer != null )
+				layeredPane.remove( titlePane.windowTopBorderLayer );
+		}
 
-		if( newTitlePane != null )
-			layeredPane.add( newTitlePane, TITLE_PANE_LAYER );
+		if( newTitlePane != null ) {
+			layeredPane.add( newTitlePane, getLayerForTitlePane() );
+			layeredPane.add( newTitlePane.mouseLayer, TITLE_PANE_MOUSE_LAYER );
+			if( newTitlePane.windowTopBorderLayer != null && newTitlePane.isWindowTopBorderNeeded() && isFullWindowContent( rootPane ) )
+				layeredPane.add( newTitlePane.windowTopBorderLayer, WINDOW_TOP_BORDER_LAYER );
+		}
 
 		titlePane = newTitlePane;
+	}
+
+	private void macInstallFullWindowContentSupport() {
+		if( !SystemInfo.isMacOS )
+			return;
+
+		// set window buttons spacing
+		if( isMacButtonsSpacingSupported() && rootPane.isDisplayable() ) {
+			int buttonsSpacing = FlatNativeMacLibrary.BUTTONS_SPACING_DEFAULT;
+			String value = (String) rootPane.getClientProperty( FlatClientProperties.MACOS_WINDOW_BUTTONS_SPACING );
+			if( value != null ) {
+				switch( value ) {
+					case FlatClientProperties.MACOS_WINDOW_BUTTONS_SPACING_MEDIUM:
+						buttonsSpacing = FlatNativeMacLibrary.BUTTONS_SPACING_MEDIUM;
+						break;
+
+					case FlatClientProperties.MACOS_WINDOW_BUTTONS_SPACING_LARGE:
+						buttonsSpacing = FlatNativeMacLibrary.BUTTONS_SPACING_LARGE;
+						break;
+				}
+			}
+
+			FlatNativeMacLibrary.setWindowButtonsSpacing( getParentWindow( rootPane ), buttonsSpacing );
+		}
+
+		// update buttons bounds client property
+		FullWindowContentSupport.macUpdateFullWindowContentButtonsBoundsProperty( rootPane );
+	}
+
+	private void macUninstallFullWindowContentSupport() {
+		if( !SystemInfo.isMacOS )
+			return;
+
+		// do not uninstall when switching to another FlatLaf theme
+		if( UIManager.getLookAndFeel() instanceof FlatLaf )
+			return;
+
+		// reset window buttons spacing
+		if( isMacButtonsSpacingSupported() )
+			FlatNativeMacLibrary.setWindowButtonsSpacing( getParentWindow( rootPane ), FlatNativeMacLibrary.BUTTONS_SPACING_DEFAULT );
+
+		// remove buttons bounds client property
+		FullWindowContentSupport.macUninstallFullWindowContentButtonsBoundsProperty( rootPane );
+	}
+
+	private boolean isMacButtonsSpacingSupported() {
+		return SystemInfo.isMacOS && SystemInfo.isJava_17_orLater && FlatNativeMacLibrary.isLoaded();
+	}
+
+	private void macInstallWindowBackgroundListener( JRootPane c ) {
+		if( !SystemInfo.isMacOS )
+			return;
+
+		Window window = getParentWindow( c );
+		if( window != null && macWindowBackgroundListener == null ) {
+			macWindowBackgroundListener = e -> macClearBackgroundForTranslucentWindow( c );
+			window.addPropertyChangeListener( "background", macWindowBackgroundListener );
+		}
+	}
+
+	private void macUninstallWindowBackgroundListener( JRootPane c ) {
+		if( !SystemInfo.isMacOS )
+			return;
+
+		Window window = getParentWindow( c );
+		if( window != null && macWindowBackgroundListener != null ) {
+			window.removePropertyChangeListener( "background", macWindowBackgroundListener );
+			macWindowBackgroundListener = null;
+		}
+	}
+
+	/**
+	 * When setting window background to translucent color (alpha < 255),
+	 * Swing paints that window translucent on Windows and Linux, but not on macOS.
+	 * The reason for this is that FlatLaf sets the background color of the root pane,
+	 * and Swing behaves a bit differently on macOS than on other platforms in that case.
+	 * Other L&Fs do not set root pane background, which is {@code null} by default.
+	 * <p>
+	 * To fix this problem, set the root pane background to {@code null}
+	 * if windows uses a translucent background.
+	 */
+	private void macClearBackgroundForTranslucentWindow( JRootPane c ) {
+		if( !SystemInfo.isMacOS )
+			return;
+
+		Window window = getParentWindow( c );
+		if( window != null ) {
+			Color windowBackground = window.getBackground();
+			if( windowBackground != null &&
+				windowBackground.getAlpha() < 255 &&
+				c.getBackground() instanceof UIResource )
+			{
+				// clear root pane background
+				c.setBackground( null );
+			}
+		}
+	}
+
+	private Window getParentWindow( JRootPane c ) {
+		// not using SwingUtilities.windowForComponent() or SwingUtilities.getWindowAncestor()
+		// here because root panes may be nested and used anywhere (e.g. in JInternalFrame)
+		// but we're only interested in the "root" root pane, which is a direct child of the window
+		Container parent = c.getParent();
+		return (parent instanceof Window) ? (Window) parent : null;
 	}
 
 	@Override
@@ -257,19 +429,103 @@ public class FlatRootPaneUI
 				}
 				break;
 
+			case FlatClientProperties.TITLE_BAR_SHOW_ICON:
+				if( titlePane != null )
+					titlePane.updateIcon();
+				break;
+
+			case FlatClientProperties.TITLE_BAR_SHOW_TITLE:
+			case FlatClientProperties.TITLE_BAR_SHOW_ICONIFFY:
+			case FlatClientProperties.TITLE_BAR_SHOW_MAXIMIZE:
+			case FlatClientProperties.TITLE_BAR_SHOW_CLOSE:
+				if( titlePane != null )
+					titlePane.updateVisibility();
+				break;
+
 			case FlatClientProperties.TITLE_BAR_BACKGROUND:
 			case FlatClientProperties.TITLE_BAR_FOREGROUND:
 				if( titlePane != null )
 					titlePane.titleBarColorsChanged();
 				break;
+
+			case FlatClientProperties.TITLE_BAR_HEIGHT:
+				if( titlePane != null )
+					titlePane.revalidate();
+				break;
+
+			case FlatClientProperties.FULL_WINDOW_CONTENT:
+				if( titlePane != null ) {
+					rootPane.getLayeredPane().setLayer( titlePane, getLayerForTitlePane() );
+					if( titlePane.windowTopBorderLayer != null ) {
+						JLayeredPane layeredPane = rootPane.getLayeredPane();
+						if( titlePane.isWindowTopBorderNeeded() && isFullWindowContent( rootPane ) )
+							layeredPane.add( titlePane.windowTopBorderLayer, WINDOW_TOP_BORDER_LAYER );
+						else
+							layeredPane.remove( titlePane.windowTopBorderLayer );
+					}
+					titlePane.updateIcon();
+					titlePane.updateVisibility();
+					titlePane.updateFullWindowContentButtonsBoundsProperty();
+				}
+				FullWindowContentSupport.revalidatePlaceholders( rootPane );
+				rootPane.revalidate();
+				break;
+
+			case FlatClientProperties.FULL_WINDOW_CONTENT_BUTTONS_BOUNDS:
+				FullWindowContentSupport.revalidatePlaceholders( rootPane );
+				break;
+
+			case FlatClientProperties.GLASS_PANE_FULL_HEIGHT:
+				rootPane.revalidate();
+				break;
+
+			case FlatClientProperties.WINDOW_STYLE:
+				if( rootPane.isDisplayable() )
+					throw new IllegalComponentStateException( "The client property 'Window.style' must be set before the window becomes displayable." );
+				break;
+
+			case "ancestor":
+				if( e.getNewValue() instanceof Window )
+					macClearBackgroundForTranslucentWindow( rootPane );
+
+				macUninstallWindowBackgroundListener( rootPane );
+				macInstallWindowBackgroundListener( rootPane );
+
+				// FlatNativeMacLibrary.setWindowButtonsSpacing() and
+				// FullWindowContentSupport.macUpdateFullWindowContentButtonsBoundsProperty()
+				// require a native window, but setting the client properties
+				// "apple.awt.fullWindowContent" or FlatClientProperties.MACOS_WINDOW_BUTTONS_SPACING
+				// is usually done before the native window is created
+				// --> try again when native window is created
+				if( e.getNewValue() instanceof Window )
+					macInstallFullWindowContentSupport();
+				break;
+
+			case FlatClientProperties.MACOS_WINDOW_BUTTONS_SPACING:
+				macInstallFullWindowContentSupport();
+				break;
+
+			case "apple.awt.fullWindowContent":
+				if( SystemInfo.isMacFullWindowContentSupported )
+					FullWindowContentSupport.macUpdateFullWindowContentButtonsBoundsProperty( rootPane );
+				break;
 		}
 	}
 
+	/** @since 3.4 */
+	protected static boolean isFullWindowContent( JRootPane rootPane ) {
+		return FlatClientProperties.clientPropertyBoolean( rootPane, FlatClientProperties.FULL_WINDOW_CONTENT, false );
+	}
+
 	protected static boolean isMenuBarEmbedded( JRootPane rootPane ) {
+		FlatTitlePane titlePane = getTitlePane( rootPane );
+		return titlePane != null && titlePane.isMenuBarEmbedded();
+	}
+
+	/** @since 2.4 */
+	protected static FlatTitlePane getTitlePane( JRootPane rootPane ) {
 		RootPaneUI ui = rootPane.getUI();
-		return ui instanceof FlatRootPaneUI &&
-			((FlatRootPaneUI)ui).titlePane != null &&
-			((FlatRootPaneUI)ui).titlePane.isMenuBarEmbedded();
+		return ui instanceof FlatRootPaneUI ? ((FlatRootPaneUI)ui).titlePane : null;
 	}
 
 	//---- class FlatRootLayout -----------------------------------------------
@@ -299,23 +555,21 @@ public class FlatRootPaneUI
 		private Dimension computeLayoutSize( Container parent, Function<Component, Dimension> getSizeFunc ) {
 			JRootPane rootPane = (JRootPane) parent;
 
-			Dimension titlePaneSize = (titlePane != null)
-				? getSizeFunc.apply( titlePane )
-				: new Dimension();
 			Dimension contentSize = (rootPane.getContentPane() != null)
 				? getSizeFunc.apply( rootPane.getContentPane() )
-				: rootPane.getSize();
+				: rootPane.getSize(); // same as in JRootPane.RootLayout.preferredLayoutSize()
 
-			int width = Math.max( titlePaneSize.width, contentSize.width );
-			int height = titlePaneSize.height + contentSize.height;
+			int width = contentSize.width; // title pane width is not considered here
+			int height = contentSize.height;
+			if( titlePane != null && !isFullWindowContent( rootPane ) )
+				height += getSizeFunc.apply( titlePane ).height;
 			if( titlePane == null || !titlePane.isMenuBarEmbedded() ) {
 				JMenuBar menuBar = rootPane.getJMenuBar();
-				Dimension menuBarSize = (menuBar != null && menuBar.isVisible())
-					? getSizeFunc.apply( menuBar )
-					: new Dimension();
-
-				width = Math.max( width, menuBarSize.width );
-				height += menuBarSize.height;
+				if( menuBar != null && menuBar.isVisible() ) {
+					Dimension menuBarSize = getSizeFunc.apply( menuBar );
+					width = Math.max( width, menuBarSize.width );
+					height += menuBarSize.height;
+				}
 			}
 
 			Insets insets = rootPane.getInsets();
@@ -336,18 +590,44 @@ public class FlatRootPaneUI
 			int width = rootPane.getWidth() - insets.left - insets.right;
 			int height = rootPane.getHeight() - insets.top - insets.bottom;
 
+			// layered pane
 			if( rootPane.getLayeredPane() != null )
 				rootPane.getLayeredPane().setBounds( x, y, width, height );
-			if( rootPane.getGlassPane() != null )
-				rootPane.getGlassPane().setBounds( x, y, width, height );
 
+			// title pane (is a child of layered pane)
 			int nextY = 0;
 			if( titlePane != null ) {
 				int prefHeight = !isFullScreen ? titlePane.getPreferredSize().height : 0;
-				titlePane.setBounds( 0, 0, width, prefHeight );
-				nextY += prefHeight;
+				boolean isFullWindowContent = isFullWindowContent( rootPane );
+				if( isFullWindowContent && !UIManager.getBoolean( FlatTitlePane.KEY_DEBUG_SHOW_RECTANGLES ) ) {
+					// place title bar into top-right corner
+					int tw = Math.min( titlePane.getPreferredSize().width, width );
+					int tx = titlePane.getComponentOrientation().isLeftToRight() ? width - tw : 0;
+					titlePane.setBounds( tx, 0, tw, prefHeight );
+				} else
+					titlePane.setBounds( 0, 0, width, prefHeight );
+
+				titlePane.mouseLayer.setBounds( 0, 0, width, prefHeight );
+				if( titlePane.windowTopBorderLayer != null ) {
+					boolean show = isFullWindowContent && !titlePane.isWindowMaximized() && !isFullScreen;
+					if( show )
+						titlePane.windowTopBorderLayer.setBounds( 0, 0, width, 1 );
+					titlePane.windowTopBorderLayer.setVisible( show );
+				}
+
+				if( !isFullWindowContent )
+					nextY += prefHeight;
 			}
 
+			// glass pane
+			if( rootPane.getGlassPane() != null ) {
+				boolean fullHeight = FlatClientProperties.clientPropertyBoolean(
+					rootPane, FlatClientProperties.GLASS_PANE_FULL_HEIGHT, false );
+				int offset = fullHeight ? 0 : nextY;
+				rootPane.getGlassPane().setBounds( x, y + offset, width, height - offset );
+			}
+
+			// menu bar (is a child of layered pane)
 			JMenuBar menuBar = rootPane.getJMenuBar();
 			if( menuBar != null && menuBar.isVisible() ) {
 				boolean embedded = !isFullScreen && titlePane != null && titlePane.isMenuBarEmbedded();
@@ -355,16 +635,28 @@ public class FlatRootPaneUI
 					titlePane.validate();
 					menuBar.setBounds( titlePane.getMenuBarBounds() );
 				} else {
+					int mx = 0;
+					int mw = width;
+					if( titlePane != null && isFullWindowContent( rootPane ) ) {
+						// make menu bar width smaller to avoid that it overlaps title bar buttons
+						int tw = Math.min( titlePane.getPreferredSize().width, width );
+						mw -= tw;
+						if( !titlePane.getComponentOrientation().isLeftToRight() )
+							mx = tw;
+					}
+
 					Dimension prefSize = menuBar.getPreferredSize();
-					menuBar.setBounds( 0, nextY, width, prefSize.height );
+					menuBar.setBounds( mx, nextY, mw, prefSize.height );
 					nextY += prefSize.height;
 				}
 			}
 
+			// content pane (is a child of layered pane)
 			Container contentPane = rootPane.getContentPane();
 			if( contentPane != null )
 				contentPane.setBounds( 0, nextY, width, Math.max( height - nextY, 0 ) );
 
+			// title pane
 			if( titlePane != null )
 				titlePane.menuBarLayouted();
 		}
@@ -372,7 +664,7 @@ public class FlatRootPaneUI
 		@Override
 		public void invalidateLayout( Container parent ) {
 			if( titlePane != null )
-				titlePane.menuBarChanged();
+				titlePane.menuBarInvalidate();
 		}
 
 		@Override
@@ -418,7 +710,7 @@ public class FlatRootPaneUI
 				return;
 
 			Container parent = c.getParent();
-			boolean active = parent instanceof Window ? ((Window)parent).isActive() : false;
+			boolean active = parent instanceof Window && ((Window)parent).isActive();
 
 			g.setColor( FlatUIUtils.deriveColor( active ? activeBorderColor : inactiveBorderColor, baseBorderColor ) );
 			HiDPIUtils.paintAtScale1x( (Graphics2D) g, x, y, width, height, this::paintImpl );
@@ -430,9 +722,7 @@ public class FlatRootPaneUI
 
 		protected boolean isWindowMaximized( Component c ) {
 			Container parent = c.getParent();
-			return parent instanceof Frame
-				? (((Frame)parent).getExtendedState() & Frame.MAXIMIZED_BOTH) != 0
-				: false;
+			return parent instanceof Frame && (((Frame)parent).getExtendedState() & Frame.MAXIMIZED_BOTH) == Frame.MAXIMIZED_BOTH;
 		}
 	}
 

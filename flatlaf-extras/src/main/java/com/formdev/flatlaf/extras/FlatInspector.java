@@ -24,6 +24,7 @@ import java.awt.Dimension;
 import java.awt.EventQueue;
 import java.awt.Font;
 import java.awt.Graphics;
+import java.awt.GraphicsConfiguration;
 import java.awt.Insets;
 import java.awt.KeyboardFocusManager;
 import java.awt.LayoutManager;
@@ -44,6 +45,7 @@ import java.awt.event.WindowListener;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import javax.swing.AbstractButton;
 import javax.swing.JComponent;
 import javax.swing.JLayeredPane;
@@ -56,6 +58,7 @@ import javax.swing.Popup;
 import javax.swing.PopupFactory;
 import javax.swing.RootPaneContainer;
 import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import javax.swing.border.Border;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
@@ -63,6 +66,8 @@ import javax.swing.plaf.UIResource;
 import javax.swing.text.JTextComponent;
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.ui.FlatUIUtils;
+import com.formdev.flatlaf.ui.MigLayoutVisualPadding;
+import com.formdev.flatlaf.util.SystemInfo;
 import com.formdev.flatlaf.util.UIScale;
 
 /**
@@ -90,7 +95,11 @@ public class FlatInspector
 {
 	private static final Integer HIGHLIGHT_LAYER = JLayeredPane.POPUP_LAYER - 1;
 
-	private static final int KEY_MODIFIERS_MASK = InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_DOWN_MASK | InputEvent.META_DOWN_MASK;
+	private static final int KEY_MODIFIERS_MASK =
+		InputEvent.CTRL_DOWN_MASK |
+		InputEvent.SHIFT_DOWN_MASK |
+		InputEvent.ALT_DOWN_MASK |
+		InputEvent.META_DOWN_MASK;
 
 	private final JRootPane rootPane;
 	private final MouseMotionListener mouseMotionListener;
@@ -100,11 +109,14 @@ public class FlatInspector
 	private Window window;
 
 	private boolean enabled;
+	private Object oldGlassPaneFullHeight;
 	private Component lastComponent;
 	private int lastX;
 	private int lastY;
 	private int inspectParentLevel;
-	private boolean wasCtrlOrShiftKeyPressed;
+	private boolean wasModifierKeyPressed;
+	private boolean showClassHierarchy;
+	private long lastWhen;
 
 	private JComponent highlightFigure;
 	private Popup popup;
@@ -113,9 +125,12 @@ public class FlatInspector
 	 * Installs a key listener into the application that allows enabling and disabling
 	 * the UI inspector with the given keystroke (e.g. "ctrl shift alt X").
 	 *
-	 * @param activationKeys a keystroke (e.g. "ctrl shift alt X")
+	 * @param activationKeys a keystroke (e.g. "ctrl shift alt X"), or {@code null} to use "ctrl shift alt X"
 	 */
 	public static void install( String activationKeys ) {
+		if( activationKeys == null )
+			activationKeys = "ctrl shift alt X";
+
 		KeyStroke keyStroke = KeyStroke.getKeyStroke( activationKeys );
 		Toolkit.getDefaultToolkit().addAWTEventListener( e -> {
 			if( e.getID() == KeyEvent.KEY_RELEASED &&
@@ -123,15 +138,29 @@ public class FlatInspector
 				(((KeyEvent)e).getModifiersEx() & KEY_MODIFIERS_MASK) == (keyStroke.getModifiers() & KEY_MODIFIERS_MASK)  )
 			{
 				Window activeWindow = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
-				if( activeWindow instanceof RootPaneContainer ) {
-					JRootPane rootPane = ((RootPaneContainer)activeWindow).getRootPane();
+				RootPaneContainer rootPaneContainer = null;
+				if( activeWindow instanceof RootPaneContainer )
+					rootPaneContainer = (RootPaneContainer) activeWindow;
+				else {
+					// search for root pain container in children
+					// (e.g. for Swing embedded into SWT)
+					for( Component child : activeWindow.getComponents() ) {
+						if( child instanceof RootPaneContainer ) {
+							rootPaneContainer = (RootPaneContainer) child;
+							break;
+						}
+					}
+				}
+
+				if( rootPaneContainer != null ) {
+					JRootPane rootPane = rootPaneContainer.getRootPane();
 					FlatInspector inspector = (FlatInspector) rootPane.getClientProperty( FlatInspector.class );
 					if( inspector == null ) {
 						inspector = new FlatInspector( rootPane );
 						rootPane.putClientProperty( FlatInspector.class, inspector );
 						inspector.setEnabled( true );
 					} else {
-						inspector.uninstall();
+						inspector.setEnabled( false );
 						rootPane.putClientProperty( FlatInspector.class, null );
 					}
 				}
@@ -151,8 +180,6 @@ public class FlatInspector
 			}
 		};
 
-		rootPane.getGlassPane().addMouseMotionListener( mouseMotionListener );
-
 		keyListener = e -> {
 			KeyEvent keyEvent = (KeyEvent) e;
 			int keyCode = keyEvent.getKeyCode();
@@ -161,9 +188,14 @@ public class FlatInspector
 			if( id == KeyEvent.KEY_PRESSED ) {
 				// this avoids that the inspection level is changed when UI inspector
 				// is enabled with keyboard shortcut (e.g. Ctrl+Shift+Alt+X)
-				if( keyCode == KeyEvent.VK_CONTROL || keyCode == KeyEvent.VK_SHIFT )
-					wasCtrlOrShiftKeyPressed = true;
-			} else if( id == KeyEvent.KEY_RELEASED && wasCtrlOrShiftKeyPressed ) {
+				if( keyCode == KeyEvent.VK_CONTROL || keyCode == KeyEvent.VK_SHIFT || keyCode == KeyEvent.VK_ALT )
+					wasModifierKeyPressed = true;
+			} else if( id == KeyEvent.KEY_RELEASED && wasModifierKeyPressed ) {
+				// ignore duplicate events (for Swing embedded into SWT)
+				if( (keyEvent.getWhen() - lastWhen) <= 5 )
+					return;
+				lastWhen = keyEvent.getWhen();
+
 				if( keyCode == KeyEvent.VK_CONTROL ) {
 					inspectParentLevel++;
 					int parentLevel = inspect( lastX, lastY );
@@ -180,6 +212,9 @@ public class FlatInspector
 						inspectParentLevel = Math.max( parentLevel - 1, 0 );
 						inspect( lastX, lastY );
 					}
+				} else if( keyCode == KeyEvent.VK_ALT && lastComponent != null) {
+					showClassHierarchy = !showClassHierarchy;
+					showToolTip( lastComponent, lastX, lastY, inspectParentLevel );
 				}
 			}
 
@@ -188,12 +223,10 @@ public class FlatInspector
 				keyEvent.consume();
 
 				if( id == KeyEvent.KEY_PRESSED ) {
+					setEnabled( false );
 					FlatInspector inspector = (FlatInspector) rootPane.getClientProperty( FlatInspector.class );
-					if( inspector == FlatInspector.this ) {
-						uninstall();
+					if( inspector == FlatInspector.this )
 						rootPane.putClientProperty( FlatInspector.class, null );
-					} else
-						setEnabled( false );
 				}
 			}
 		};
@@ -209,12 +242,6 @@ public class FlatInspector
 				hidePopup();
 			}
 		};
-	}
-
-	private void uninstall() {
-		setEnabled( false );
-		rootPane.getGlassPane().setVisible( false );
-		rootPane.getGlassPane().removeMouseMotionListener( mouseMotionListener );
 	}
 
 
@@ -236,6 +263,14 @@ public class FlatInspector
 
 		this.enabled = enabled;
 
+		// make sure that glass pane has full height if enabled
+		if( enabled ) {
+			oldGlassPaneFullHeight = rootPane.getClientProperty( FlatClientProperties.GLASS_PANE_FULL_HEIGHT );
+			rootPane.putClientProperty( FlatClientProperties.GLASS_PANE_FULL_HEIGHT, true );
+			rootPane.validate();
+		} else
+			rootPane.putClientProperty( FlatClientProperties.GLASS_PANE_FULL_HEIGHT, oldGlassPaneFullHeight );
+
 		// make sure that glass pane is not opaque, which is not the case in WebLaF
 		((JComponent)rootPane.getGlassPane()).setOpaque( false );
 
@@ -247,6 +282,12 @@ public class FlatInspector
 			toolkit.addAWTEventListener( keyListener, AWTEvent.KEY_EVENT_MASK );
 		else
 			toolkit.removeAWTEventListener( keyListener );
+
+		// add/remove mouse listener
+		if( enabled )
+			rootPane.getGlassPane().addMouseMotionListener( mouseMotionListener );
+		else
+			rootPane.getGlassPane().removeMouseMotionListener( mouseMotionListener );
 
 		// add/remove window listener
 		if( enabled ) {
@@ -402,7 +443,7 @@ public class FlatInspector
 			return;
 
 		JToolTip tip = new JToolTip();
-		tip.setTipText( buildToolTipText( c, parentLevel ) );
+		tip.setTipText( buildToolTipText( c, parentLevel, showClassHierarchy ) );
 		tip.putClientProperty( FlatClientProperties.POPUP_FORCE_HEAVY_WEIGHT, true );
 
 		Point pt = new Point( x, y );
@@ -413,31 +454,31 @@ public class FlatInspector
 		Dimension size = tip.getPreferredSize();
 
 		// position the tip in the visible area
-		Rectangle visibleRect = rootPane.getGraphicsConfiguration().getBounds();
-		if( tx + size.width > visibleRect.x + visibleRect.width )
-			tx -= size.width + UIScale.scale( 16 );
-		if( ty + size.height > visibleRect.y + visibleRect.height )
-			ty -= size.height + UIScale.scale( 32 );
-		if( tx < visibleRect.x )
-			tx = visibleRect.x;
-		if( ty < visibleRect.y )
-			ty = visibleRect.y;
+		GraphicsConfiguration gc = rootPane.getGraphicsConfiguration();
+		if( gc != null ) {
+			Rectangle visibleRect = gc.getBounds();
+			if( tx + size.width > visibleRect.x + visibleRect.width )
+				tx -= size.width + UIScale.scale( 16 );
+			if( ty + size.height > visibleRect.y + visibleRect.height )
+				ty -= size.height + UIScale.scale( 32 );
+			if( tx < visibleRect.x )
+				tx = visibleRect.x;
+			if( ty < visibleRect.y )
+				ty = visibleRect.y;
+		}
 
 		PopupFactory popupFactory = PopupFactory.getSharedInstance();
 		popup = popupFactory.getPopup( c, tip, tx, ty );
 		popup.show();
 	}
 
-	private static String buildToolTipText( Component c, int parentLevel ) {
+	private static String buildToolTipText( Component c, int parentLevel, boolean classHierarchy ) {
 		StringBuilder buf = new StringBuilder( 1500 );
 		buf.append( "<html><style>" );
 		buf.append( "td { padding: 0 10 0 0; }" );
 		buf.append( "</style><table>" );
 
-		String name = c.getClass().getName();
-		name = name.substring( name.lastIndexOf( '.' ) + 1 );
-		Package pkg = c.getClass().getPackage();
-		appendRow( buf, "Class", name + " (" + (pkg != null ? pkg.getName() : "-") + ")" );
+		appendRow( buf, "Class", toString( c.getClass(), classHierarchy ) );
 		appendRow( buf, "Size", c.getWidth() + ", " + c.getHeight() + "&nbsp;&nbsp; @ " + c.getX() + ", " + c.getY() );
 
 		if( c instanceof Container )
@@ -456,6 +497,15 @@ public class FlatInspector
 		if( margin != null )
 			appendRow( buf, "Margin", toString( margin ) );
 
+		if( c instanceof JComponent ) {
+			Object value = ((JComponent)c).getClientProperty( MigLayoutVisualPadding.VISUAL_PADDING_PROPERTY );
+			Insets visualPadding = (value instanceof int[])
+				? new Insets( ((int[])value)[0], ((int[])value)[1], ((int[])value)[2], ((int[])value)[3] )
+				: (value instanceof Insets ? (Insets) value : null);
+			if( visualPadding != null )
+				appendRow( buf, "Mig visual padding", toString( visualPadding ) );
+		}
+
 		Dimension prefSize = c.getPreferredSize();
 		Dimension minSize = c.getMinimumSize();
 		Dimension maxSize = c.getMaximumSize();
@@ -464,18 +514,26 @@ public class FlatInspector
 		appendRow( buf, "Max size", maxSize.width + ", " + maxSize.height );
 
 		if( c instanceof JComponent )
-			appendRow( buf, "Border", toString( ((JComponent)c).getBorder() ) );
+			appendRow( buf, "Border", toString( ((JComponent)c).getBorder(), classHierarchy ) );
 
-		appendRow( buf, "Background", toString( c.getBackground() ) );
-		appendRow( buf, "Foreground", toString( c.getForeground() ) );
-		appendRow( buf, "Font", toString( c.getFont() ) );
+		appendRow( buf, "Background", toString( c.getBackground() ) + (c.isBackgroundSet() ? "" : "  NOT SET") );
+		appendRow( buf, "Foreground", toString( c.getForeground() ) + (c.isForegroundSet() ? "" : "  NOT SET") );
+		appendRow( buf, "Font", toString( c.getFont() ) + (c.isFontSet() ? "" : "  NOT SET") );
 
 		if( c instanceof JComponent ) {
 			try {
-				Field f = JComponent.class.getDeclaredField( "ui" );
-				f.setAccessible( true );
-				Object ui = f.get( c );
-				appendRow( buf, "UI", (ui != null ? ui.getClass().getName() : "null") );
+				Object ui;
+				if( SystemInfo.isJava_9_orLater ) {
+					// Java 9+: use public method JComponent.getUI()
+					Method m = JComponent.class.getMethod( "getUI" );
+					ui = m.invoke( c );
+				} else {
+					// Java 8: read protected field 'ui'
+					Field f = JComponent.class.getDeclaredField( "ui" );
+					f.setAccessible( true );
+					ui = f.get( c );
+				}
+				appendRow( buf, "UI", (ui != null ? toString( ui.getClass(), classHierarchy ) : "null") );
 			} catch( Exception ex ) {
 				// ignore
 			}
@@ -484,7 +542,7 @@ public class FlatInspector
 		if( c instanceof Container ) {
 			LayoutManager layout = ((Container)c).getLayout();
 			if( layout != null )
-				appendRow( buf, "Layout", layout.getClass().getName() );
+				appendRow( buf, "Layout", toString( layout.getClass(), classHierarchy ) );
 		}
 
 		appendRow( buf, "Enabled", String.valueOf( c.isEnabled() ) );
@@ -494,16 +552,29 @@ public class FlatInspector
 			appendRow( buf, "ContentAreaFilled", String.valueOf( ((AbstractButton)c).isContentAreaFilled() ) );
 		appendRow( buf, "Focusable", String.valueOf( c.isFocusable() ) );
 		appendRow( buf, "Left-to-right", String.valueOf( c.getComponentOrientation().isLeftToRight() ) );
-		appendRow( buf, "Parent", (c.getParent() != null ? c.getParent().getClass().getName() : "null") );
+		appendRow( buf, "Parent", (c.getParent() != null ? toString( c.getParent().getClass(), classHierarchy ) : "null") );
 
+		if( c instanceof JComponent ) {
+			Object style = ((JComponent)c).getClientProperty( FlatClientProperties.STYLE );
+			if( style != null )
+				appendRow( buf, "FlatLaf Style", style.toString() );
+		}
+
+		// append parent level
 		buf.append( "<tr><td colspan=\"2\">" );
 		if( parentLevel > 0 )
 			buf.append( "<br>Parent level: " + parentLevel );
 
-		if( parentLevel > 0 )
-			buf.append( "<br>(press Ctrl/Shift to increase/decrease level)" );
-		else
-			buf.append( "<br>(press Ctrl key to inspect parent)" );
+		// append modifier keys hint
+		buf.append( "<br>(" )
+			.append( (parentLevel > 0)
+				? "press <b>Ctrl/Shift</b> to increase/decrease level"
+				: "press <b>Ctrl</b> key to inspect parent" )
+			.append( "; &nbsp;" )
+			.append( classHierarchy
+				? "press <b>Alt</b> key to hide class hierarchy"
+				: "press <b>Alt</b> key to show class hierarchy" )
+			.append( ')' );
 
 		buf.append( "</td></tr>" );
 		buf.append( "</table></html>" );
@@ -512,11 +583,44 @@ public class FlatInspector
 	}
 
 	private static void appendRow( StringBuilder buf, String key, String value ) {
-		buf.append( "<tr><td>" )
+		buf.append( "<tr><td valign=\"top\">" )
 			.append( key )
 			.append( ":</td><td>" )
 			.append( value )
 			.append( "</td></tr>" );
+	}
+
+	private static String toString( Class<?> cls, boolean classHierarchy ) {
+		StringBuilder buf = new StringBuilder( 100 );
+		int level = 0;
+
+		while( cls != null ) {
+			if( level > 0 ) {
+				if( cls == Object.class )
+					break;
+				buf.append( "<br>&nbsp;" );
+				for( int i = 1; i < level; i++ )
+					buf.append( "&nbsp;&nbsp;&nbsp;&nbsp;" );
+				buf.append( "\u2570 " );
+			}
+			level++;
+
+			String name = cls.getName();
+			int dot = name.lastIndexOf( '.' );
+			String pkg = (dot >= 0) ? name.substring( 0, dot ) : "-";
+			String simpleName = (dot >= 0) ? name.substring( dot + 1 ) : name;
+			buf.append( simpleName ).append( ' ' ).append( toDimmedText( "(" + pkg + ")" ) );
+
+			if( UIResource.class.isAssignableFrom( cls ) )
+				buf.append( " UI" );
+
+			if( !classHierarchy )
+				break;
+
+			cls = cls.getSuperclass();
+		}
+
+		return buf.toString();
 	}
 
 	private static String toString( Insets insets ) {
@@ -564,18 +668,31 @@ public class FlatInspector
 			+ (f instanceof UIResource ? " UI" : "");
 	}
 
-	private static String toString( Border b ) {
+	private static String toString( Border b, boolean classHierarchy ) {
 		if( b == null )
 			return "null";
 
-		String s = b.getClass().getName();
+		String s = toString( b.getClass(), classHierarchy );
 
-		if( b instanceof EmptyBorder )
-			s += '(' + toString( ((EmptyBorder)b).getBorderInsets() ) + ')';
-
-		if( b instanceof UIResource )
-			s += " UI";
+		if( b instanceof EmptyBorder ) {
+			String borderInsets = " (" + toString( ((EmptyBorder)b).getBorderInsets() ) + ')';
+			int brIndex = s.indexOf( "<br>" );
+			if( brIndex >= 0 )
+				s = s.substring( 0, brIndex ) + borderInsets + s.substring( brIndex );
+			else
+				s += borderInsets;
+		}
 
 		return s;
+	}
+
+	private static String toDimmedText( String text ) {
+		Color color = UIManager.getColor( "Label.disabledForeground" );
+		if( color == null )
+			color = UIManager.getColor( "Label.disabledText" );
+		if( color == null )
+			color = Color.GRAY;
+		return String.format( "<span color=\"#%06x\">%s</span>",
+			color.getRGB() & 0xffffff, text );
 	}
 }

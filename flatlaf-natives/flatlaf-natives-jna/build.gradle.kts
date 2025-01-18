@@ -16,10 +16,11 @@
 
 plugins {
 	`java-library`
+	`flatlaf-toolchain`
 }
 
 dependencies {
 	implementation( project( ":flatlaf-core" ) )
-	implementation( "net.java.dev.jna:jna:5.7.0" )
-	implementation( "net.java.dev.jna:jna-platform:5.7.0" )
+	implementation( libs.jna )
+	implementation( libs.jna.platform )
 }

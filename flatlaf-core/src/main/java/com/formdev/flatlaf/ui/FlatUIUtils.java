@@ -28,36 +28,48 @@ import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsDevice;
 import java.awt.Insets;
 import java.awt.KeyboardFocusManager;
+import java.awt.Paint;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.Stroke;
+import java.awt.SystemColor;
 import java.awt.Window;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Path2D;
+import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
 import java.util.IdentityHashMap;
 import java.util.WeakHashMap;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import javax.swing.Icon;
 import javax.swing.JComponent;
+import javax.swing.JScrollPane;
 import javax.swing.JTable;
+import javax.swing.JTextField;
 import javax.swing.LookAndFeel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.UIDefaults;
 import javax.swing.UIManager;
 import javax.swing.border.Border;
 import javax.swing.border.CompoundBorder;
 import javax.swing.plaf.ComponentUI;
 import javax.swing.plaf.UIResource;
+import javax.swing.tree.DefaultTreeCellEditor;
 import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.FlatIntelliJLaf;
+import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.FlatLightLaf;
 import com.formdev.flatlaf.FlatSystemProperties;
 import com.formdev.flatlaf.util.DerivedColor;
 import com.formdev.flatlaf.util.Graphics2DProxy;
 import com.formdev.flatlaf.util.HiDPIUtils;
+import com.formdev.flatlaf.util.SystemInfo;
 import com.formdev.flatlaf.util.UIScale;
 
 /**
@@ -67,9 +79,8 @@ import com.formdev.flatlaf.util.UIScale;
  */
 public class FlatUIUtils
 {
-	public static final boolean MAC_USE_QUARTZ = Boolean.getBoolean( "apple.awt.graphics.UseQuartz" );
-
-	private static WeakHashMap<LookAndFeel, IdentityHashMap<Object, ComponentUI>> sharedUIinstances = new WeakHashMap<>();
+	private static boolean useSharedUIs = true;
+	private static final WeakHashMap<LookAndFeel, IdentityHashMap<Object, ComponentUI>> sharedUIinstances = new WeakHashMap<>();
 
 	public static Rectangle addInsets( Rectangle r, Insets insets ) {
 		return new Rectangle(
@@ -94,6 +105,11 @@ public class FlatUIUtils
 	}
 
 	public static Insets addInsets( Insets insets1, Insets insets2 ) {
+		if( insets1 == null )
+			return insets2;
+		if( insets2 == null )
+			return insets1;
+
 		return new Insets(
 			insets1.top + insets2.top,
 			insets1.left + insets2.left,
@@ -106,6 +122,25 @@ public class FlatUIUtils
 		dest.left = src.left;
 		dest.bottom = src.bottom;
 		dest.right = src.right;
+	}
+
+	/** @since 3.5 */
+	public static boolean isInsetsEmpty( Insets insets ) {
+		return insets.top == 0 && insets.left == 0 && insets.bottom == 0 && insets.right == 0;
+	}
+
+	/** @since 3.6 */
+	public static Color stateColor( boolean state, Color stateColor, Color defaultColor ) {
+		return (state && stateColor != null) ? stateColor : defaultColor;
+	}
+
+	/** @since 3.6 */
+	public static Color stateColor( boolean state1, Color state1Color,
+		boolean state2, Color state2Color, Color defaultColor )
+	{
+		return (state1 && state1Color != null)
+			? state1Color
+			: ((state2 && state2Color != null) ? state2Color : defaultColor);
 	}
 
 	public static Color getUIColor( String key, int defaultColorRGB ) {
@@ -123,9 +158,7 @@ public class FlatUIUtils
 		return (color != null) ? color : UIManager.getColor( defaultKey );
 	}
 
-	/**
-	 * @since 1.1
-	 */
+	/** @since 1.1 */
 	public static boolean getUIBoolean( String key, boolean defaultValue ) {
 		Object value = UIManager.get( key );
 		return (value instanceof Boolean) ? (Boolean) value : defaultValue;
@@ -141,9 +174,102 @@ public class FlatUIUtils
 		return (value instanceof Number) ? ((Number)value).floatValue() : defaultValue;
 	}
 
+	/** @since 2 */
+	public static <T extends Enum<T>> T getUIEnum( String key, Class<T> enumType, T defaultValue ) {
+		Object value = UIManager.get( key );
+		if( value instanceof String ) {
+			try {
+				return Enum.valueOf( enumType, (String) value );
+			} catch( IllegalArgumentException ex ) {
+				// ignore
+			}
+		}
+		return defaultValue;
+	}
+
+	/** @since 3.2 */
+	public static Color getSubUIColor( String key, String subKey ) {
+		if( subKey != null ) {
+			Color value = UIManager.getColor( buildSubKey( key, subKey ) );
+			if( value != null )
+				return value;
+		}
+		return UIManager.getColor( key );
+	}
+
+	/** @since 3.2 */
+	public static boolean getSubUIBoolean( String key, String subKey, boolean defaultValue ) {
+		if( subKey != null ) {
+			Object value = UIManager.get( buildSubKey( key, subKey ) );
+			if( value instanceof Boolean )
+				return (Boolean) value;
+		}
+		return getUIBoolean( key, defaultValue );
+	}
+
+	/** @since 3.2 */
+	public static int getSubUIInt( String key, String subKey, int defaultValue ) {
+		if( subKey != null ) {
+			Object value = UIManager.get( buildSubKey( key, subKey ) );
+			if( value instanceof Integer )
+				return (Integer) value;
+		}
+		return getUIInt( key, defaultValue );
+	}
+
+	/** @since 3.2 */
+	public static Insets getSubUIInsets( String key, String subKey ) {
+		if( subKey != null ) {
+			Insets value = UIManager.getInsets( buildSubKey( key, subKey ) );
+			if( value != null )
+				return value;
+		}
+		return UIManager.getInsets( key );
+	}
+
+	/** @since 3.2 */
+	public static Dimension getSubUIDimension( String key, String subKey ) {
+		if( subKey != null ) {
+			Dimension value = UIManager.getDimension( buildSubKey( key, subKey ) );
+			if( value != null )
+				return value;
+		}
+		return UIManager.getDimension( key );
+	}
+
+	/** @since 3.2 */
+	public static Icon getSubUIIcon( String key, String subKey ) {
+		if( subKey != null ) {
+			Icon value = UIManager.getIcon( buildSubKey( key, subKey ) );
+			if( value != null )
+				return value;
+		}
+		return UIManager.getIcon( key );
+	}
+
+	/** @since 3.2 */
+	public static Font getSubUIFont( String key, String subKey ) {
+		if( subKey != null ) {
+			Font value = UIManager.getFont( buildSubKey( key, subKey ) );
+			if( value != null )
+				return value;
+		}
+		return UIManager.getFont( key );
+	}
+
 	/**
-	 * @since 1.1.2
+	 * Inserts {@code subKey} at last dot in {@code key}.
+	 * <p>
+	 * E.g. {@code buildSubKey( "TitlePane.font", "small" )} returns {@code "TitlePane.small.font"}.
 	 */
+	private static String buildSubKey( String key, String subKey ) {
+		int dot = key.lastIndexOf( '.' );
+		return (dot >= 0)
+			? key.substring( 0, dot ) + '.' + subKey + '.' + key.substring( dot + 1 )
+			: key;
+	}
+
+	/** @since 1.1.2 */
 	public static boolean getBoolean( JComponent c, String systemPropertyKey,
 		String clientPropertyKey, String uiKey, boolean defaultValue )
 	{
@@ -172,6 +298,15 @@ public class FlatUIUtils
 		return (font instanceof UIResource) ? font.deriveFont( font.getStyle() ) : font;
 	}
 
+	/** @since 2 */
+	public static Border nonUIResource( Border border ) {
+		return (border instanceof UIResource) ? new NonUIResourceBorder( border ) : border;
+	}
+
+	static Border unwrapNonUIResourceBorder( Border border ) {
+		return (border instanceof NonUIResourceBorder) ? ((NonUIResourceBorder)border).delegate : border;
+	}
+
 	public static int minimumWidth( JComponent c, int minimumWidth ) {
 		return FlatClientProperties.clientPropertyInt( c, FlatClientProperties.MINIMUM_WIDTH, minimumWidth );
 	}
@@ -181,15 +316,17 @@ public class FlatUIUtils
 	}
 
 	public static boolean isCellEditor( Component c ) {
-		// check whether used in cell editor (check 3 levels up)
-		Component c2 = c;
-		for( int i = 0; i <= 2 && c2 != null; i++ ) {
-			Container parent = c2.getParent();
-			if( parent instanceof JTable && ((JTable)parent).getEditorComponent() == c2 )
-				return true;
+		if( c == null )
+			return false;
 
-			c2 = parent;
-		}
+		// check whether used as table cell editor
+		Container parent = c.getParent();
+		if( parent instanceof JTable && ((JTable)parent).getEditorComponent() == c )
+			return true;
+
+		// check whether used as tree cell editor
+		if( parent instanceof DefaultTreeCellEditor.EditorContainer )
+			return true;
 
 		// check whether used as cell editor
 		//   Table.editor is set in JTable.GenericEditor constructor
@@ -220,14 +357,51 @@ public class FlatUIUtils
 			}
 		}
 
+		// invoke hasFocus() here because components may have overridden this method
+		// (e.g. Swing delegate components used for AWT components on macOS)
+		if( c.hasFocus() )
+			return true;
+
 		return keyboardFocusManager.getPermanentFocusOwner() == c &&
 			isInActiveWindow( c, keyboardFocusManager.getActiveWindow() );
 	}
 
-	private static boolean isInActiveWindow( Component c, Window activeWindow ) {
+	static boolean isInActiveWindow( Component c, Window activeWindow ) {
 		Window window = SwingUtilities.windowForComponent( c );
 		return window == activeWindow ||
 			(window != null && window.getType() == Window.Type.POPUP && window.getOwner() == activeWindow);
+	}
+
+	static boolean isAWTPeer( Component c ) {
+		// on macOS, Swing components are used for AWT components
+		if( SystemInfo.isMacOS )
+			return c.getClass().getName().startsWith( "sun.lwawt.LW" );
+		return false;
+	}
+
+	/**
+	 * Checks whether component is used as peer for AWT (on macOS) and
+	 * whether a dark FlatLaf theme is active, which requires special handling
+	 * because AWT always uses light colors.
+	 */
+	static boolean needsLightAWTPeer( JComponent c ) {
+		return FlatUIUtils.isAWTPeer( c ) && FlatLaf.isLafDark();
+	}
+
+	private static UIDefaults lightAWTPeerDefaults;
+
+	static void runWithLightAWTPeerUIDefaults( Runnable runnable ) {
+		if( lightAWTPeerDefaults == null ) {
+			FlatLaf lightLaf = UIManager.getInt( "Component.focusWidth" ) >= 2
+				? new FlatIntelliJLaf()
+				: new FlatLightLaf();
+			lightAWTPeerDefaults = lightLaf.getDefaults();
+		}
+
+		FlatLaf.runWithUIDefaultsGetter( key -> {
+			Object value = lightAWTPeerDefaults.get( key );
+			return (value != null) ? value : FlatLaf.NULL_VALUE;
+		}, runnable );
 	}
 
 	/**
@@ -254,6 +428,32 @@ public class FlatUIUtils
 		FlatBorder border = getOutsideFlatBorder( c );
 		return (border != null)
 			? UIScale.scale( (float) border.getFocusWidth( c ) )
+			: 0;
+	}
+
+	/**
+	 * Returns the scaled line thickness used to compute the border insets.
+	 *
+	 * @since 2
+	 */
+	public static float getBorderLineWidth( JComponent c ) {
+		FlatBorder border = getOutsideFlatBorder( c );
+		return (border != null)
+			? UIScale.scale( (float) border.getLineWidth( c ) )
+			: 0;
+	}
+
+	/**
+	 * Returns the scaled thickness of the border.
+	 * This includes the outer focus border and the actual component border.
+	 *
+	 * @since 2
+	 */
+	public static int getBorderFocusAndLineWidth( JComponent c ) {
+		FlatBorder border = getOutsideFlatBorder( c );
+		return (border != null)
+			? Math.round( UIScale.scale( (float) border.getFocusWidth( c ) )
+				+ UIScale.scale( (float) border.getLineWidth( c ) ) )
 			: 0;
 	}
 
@@ -288,14 +488,13 @@ public class FlatUIUtils
 	 */
 	public static Object[] setRenderingHints( Graphics g ) {
 		Graphics2D g2 = (Graphics2D) g;
-		Object[] oldRenderingHints = new Object[] {
+		Object[] oldRenderingHints = {
 			g2.getRenderingHint( RenderingHints.KEY_ANTIALIASING ),
 			g2.getRenderingHint( RenderingHints.KEY_STROKE_CONTROL ),
 		};
 
 		g2.setRenderingHint( RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON );
-		g2.setRenderingHint( RenderingHints.KEY_STROKE_CONTROL,
-			MAC_USE_QUARTZ ? RenderingHints.VALUE_STROKE_PURE : RenderingHints.VALUE_STROKE_NORMALIZE );
+		g2.setRenderingHint( RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_NORMALIZE );
 
 		return oldRenderingHints;
 	}
@@ -305,8 +504,10 @@ public class FlatUIUtils
 	 */
 	public static void resetRenderingHints( Graphics g, Object[] oldRenderingHints ) {
 		Graphics2D g2 = (Graphics2D) g;
-		g2.setRenderingHint( RenderingHints.KEY_ANTIALIASING, oldRenderingHints[0] );
-		g2.setRenderingHint( RenderingHints.KEY_STROKE_CONTROL, oldRenderingHints[1] );
+		if( oldRenderingHints[0] != null )
+			g2.setRenderingHint( RenderingHints.KEY_ANTIALIASING, oldRenderingHints[0] );
+		if( oldRenderingHints[1] != null )
+			g2.setRenderingHint( RenderingHints.KEY_STROKE_CONTROL, oldRenderingHints[1] );
 	}
 
 	/**
@@ -329,7 +530,7 @@ public class FlatUIUtils
 		}
 
 		Graphics2D g2 = (Graphics2D) g;
-		Object[] oldRenderingHints2 = new Object[] {
+		Object[] oldRenderingHints2 = {
 			g2.getRenderingHint( RenderingHints.KEY_ANTIALIASING ),
 			g2.getRenderingHint( RenderingHints.KEY_STROKE_CONTROL ),
 		};
@@ -346,145 +547,248 @@ public class FlatUIUtils
 	}
 
 	/**
-	 * Paints an outer border, which is usually a focus border.
+	 * Fills the background of a component with a rounded rectangle.
 	 * <p>
-	 * The outside bounds of the painted border are {@code x,y,width,height}.
-	 * The line thickness of the painted border is {@code focusWidth + lineWidth}.
-	 * The given arc diameter refers to the inner rectangle ({@code x,y,width,height} minus {@code focusWidth}).
-	 *
-	 * @see #paintComponentBorder
-	 * @see #paintComponentBackground
-	 */
-	public static void paintComponentOuterBorder( Graphics2D g, int x, int y, int width, int height,
-		float focusWidth, float lineWidth, float arc )
-	{
-		if( focusWidth + lineWidth == 0 )
-			return; // nothing to paint
-
-		double systemScaleFactor = UIScale.getSystemScaleFactor( g );
-		if( systemScaleFactor != 1 && systemScaleFactor != 2 ) {
-			// paint at scale 1x to avoid clipping on right and bottom edges at 125%, 150% or 175%
-			HiDPIUtils.paintAtScale1x( g, x, y, width, height,
-				(g2d, x2, y2, width2, height2, scaleFactor) -> {
-					paintComponentOuterBorderImpl( g2d, x2, y2, width2, height2,
-						(float) (focusWidth * scaleFactor), (float) (lineWidth * scaleFactor), (float) (arc * scaleFactor) );
-				} );
-			return;
-		}
-
-		paintComponentOuterBorderImpl( g, x, y, width, height, focusWidth, lineWidth, arc );
-	}
-
-	private static void paintComponentOuterBorderImpl( Graphics2D g, int x, int y, int width, int height,
-		float focusWidth, float lineWidth, float arc )
-	{
-		float ow = focusWidth + lineWidth;
-		float outerArc = arc + (focusWidth * 2);
-		float innerArc = arc - (lineWidth * 2);
-
-		// reduce outer arc slightly for small arcs to make the curve slightly wider
-		if( focusWidth > 0 && arc > 0 && arc < UIScale.scale( 10 ) )
-			outerArc -= UIScale.scale( 2f );
-
-		Path2D path = new Path2D.Float( Path2D.WIND_EVEN_ODD );
-		path.append( createComponentRectangle( x, y, width, height, outerArc ), false );
-		path.append( createComponentRectangle( x + ow, y + ow, width - (ow * 2), height - (ow * 2), innerArc ), false );
-		g.fill( path );
-	}
-
-	/**
-	 * Draws the border of a component as round rectangle.
-	 * <p>
-	 * The outside bounds of the painted border are
-	 * {@code x + focusWidth, y + focusWidth, width - (focusWidth * 2), height - (focusWidth * 2)}.
-	 * The line thickness of the painted border is {@code lineWidth}.
-	 * The given arc diameter refers to the painted rectangle (and not to {@code x,y,width,height}).
-	 *
-	 * @see #paintComponentOuterBorder
-	 * @see #paintComponentBackground
-	 */
-	public static void paintComponentBorder( Graphics2D g, int x, int y, int width, int height,
-		float focusWidth, float lineWidth, float arc )
-	{
-		if( lineWidth == 0 )
-			return; // nothing to paint
-
-		double systemScaleFactor = UIScale.getSystemScaleFactor( g );
-		if( systemScaleFactor != 1 && systemScaleFactor != 2 ) {
-			// paint at scale 1x to avoid clipping on right and bottom edges at 125%, 150% or 175%
-			HiDPIUtils.paintAtScale1x( g, x, y, width, height,
-				(g2d, x2, y2, width2, height2, scaleFactor) -> {
-					paintComponentBorderImpl( g2d, x2, y2, width2, height2,
-						(float) (focusWidth * scaleFactor), (float) (lineWidth * scaleFactor), (float) (arc * scaleFactor) );
-				} );
-			return;
-		}
-
-		paintComponentBorderImpl( g, x, y, width, height, focusWidth, lineWidth, arc );
-	}
-
-	private static void paintComponentBorderImpl( Graphics2D g, int x, int y, int width, int height,
-		float focusWidth, float lineWidth, float arc )
-	{
-		float x1 = x + focusWidth;
-		float y1 = y + focusWidth;
-		float width1 = width - focusWidth * 2;
-		float height1 = height - focusWidth * 2;
-		float arc2 = arc - (lineWidth * 2);
-
-		Shape r1 = createComponentRectangle( x1, y1, width1, height1, arc );
-		Shape r2 = createComponentRectangle(
-			x1 + lineWidth, y1 + lineWidth,
-			width1 - lineWidth * 2, height1 - lineWidth * 2, arc2 );
-
-		Path2D border = new Path2D.Float( Path2D.WIND_EVEN_ODD );
-		border.append( r1, false );
-		border.append( r2, false );
-		g.fill( border );
-	}
-
-	/**
-	 * Fills the background of a component with a round rectangle.
-	 * <p>
-	 * The bounds of the painted round rectangle are
+	 * The bounds of the painted rounded rectangle are
 	 * {@code x + focusWidth, y + focusWidth, width - (focusWidth * 2), height - (focusWidth * 2)}.
 	 * The given arc diameter refers to the painted rectangle (and not to {@code x,y,width,height}).
 	 *
-	 * @see #paintComponentOuterBorder
-	 * @see #paintComponentBorder
+	 * @see #paintOutlinedComponent
 	 */
 	public static void paintComponentBackground( Graphics2D g, int x, int y, int width, int height,
 		float focusWidth, float arc )
 	{
+		paintOutlinedComponent( g, x, y, width, height, focusWidth, 0, 0, 0, arc, null, null, g.getPaint() );
+	}
+
+	/**
+	 * Paints an outlined component with rounded corners, consisting of following parts:
+	 * <ul>
+	 * <li>an (optional) outer border, which is usually a focus indicator
+	 * <li>an (optional) component border
+	 * <li>the (optional) component background
+	 * </ul>
+	 * <p>
+	 *
+	 * Each part is painted only if the corresponding part color is not {@code null}.
+	 * The parts are painted in this order:
+	 * <ol>
+	 * <li>background
+	 * <li>focus border
+	 * <li>border
+	 * </ol>
+	 * <p>
+	 *
+	 * <strong>Background</strong>:
+	 * The bounds of the filled rounded rectangle are
+	 * {@code [x + focusWidth, y + focusWidth, width - (focusWidth * 2), height - (focusWidth * 2)]}.
+	 * The focus border and the border may paint over the background.
+	 * <p>
+	 *
+	 * <strong>Focus border</strong>:
+	 * The outside bounds of the painted focus border are {@code [x, y, width, height]}.
+	 * The thickness of the painted focus border is {@code (focusWidth * focusWidthFraction) + focusInnerWidth}.
+	 * The border may paint over the focus border if {@code focusInnerWidth > 0}.
+	 * <p>
+	 *
+	 * <strong>Border</strong>:
+	 * The outside bounds of the painted border are
+	 * {@code [x + focusWidth, y + focusWidth, width - (focusWidth * 2), height - (focusWidth * 2)]}.
+	 * The thickness of the painted border is {@code borderWidth}.
+	 *
+	 * @param g the graphics context used for painting
+	 * @param x the x coordinate of the component
+	 * @param y the y coordinate of the component
+	 * @param width the width of the component
+	 * @param height the height of the component
+	 * @param focusWidth the width of the focus border, or {@code 0}
+	 * @param focusWidthFraction specified how much of the focus border is painted (in range 0 - 1);
+	 *                           can be used for animation;
+	 *                           the painted thickness of the focus border is {@code (focusWidth * focusWidthFraction) + focusInnerWidth}
+	 * @param focusInnerWidth the inner width of the focus border, or {@code 0};
+	 *                        if a border is painted then {@code focusInnerWidth} needs to be larger
+	 *                        than {@code borderWidth} to be not hidden by the border
+	 * @param borderWidth the width of the border, or {@code 0}
+	 * @param arc the arc diameter used for the outside shape of the component border;
+	 *            the other needed arc diameters are computed from this arc diameter
+	 * @param focusColor the color of the focus border, or {@code null}
+	 * @param borderColor the color of the border, or {@code null}
+	 * @param background the background color of the component, or {@code null}
+	 *
+	 * @since 2
+	 */
+	public static void paintOutlinedComponent( Graphics2D g, int x, int y, int width, int height,
+		float focusWidth, float focusWidthFraction, float focusInnerWidth, float borderWidth, float arc,
+		Paint focusColor, Paint borderColor, Paint background )
+	{
+		paintOutlinedComponent( g, x, y, width, height, focusWidth, focusWidthFraction, focusInnerWidth,
+			borderWidth, arc, focusColor, borderColor, background, false );
+	}
+
+	static void paintOutlinedComponent( Graphics2D g, int x, int y, int width, int height,
+		float focusWidth, float focusWidthFraction, float focusInnerWidth, float borderWidth, float arc,
+		Paint focusColor, Paint borderColor, Paint background, boolean scrollPane )
+	{
 		double systemScaleFactor = UIScale.getSystemScaleFactor( g );
-		if( systemScaleFactor != 1 && systemScaleFactor != 2 ) {
+		if( (int) systemScaleFactor != systemScaleFactor ) {
 			// paint at scale 1x to avoid clipping on right and bottom edges at 125%, 150% or 175%
 			HiDPIUtils.paintAtScale1x( g, x, y, width, height,
 				(g2d, x2, y2, width2, height2, scaleFactor) -> {
-					paintComponentBackgroundImpl( g2d, x2, y2, width2, height2,
-						(float) (focusWidth * scaleFactor), (float) (arc * scaleFactor) );
+					paintOutlinedComponentImpl( g2d, x2, y2, width2, height2,
+						(float) (focusWidth * scaleFactor), focusWidthFraction, (float) (focusInnerWidth * scaleFactor),
+						(float) (borderWidth * scaleFactor), (float) (arc * scaleFactor),
+						focusColor, borderColor, background, scrollPane, scaleFactor );
 				} );
 			return;
 		}
 
-		paintComponentBackgroundImpl( g, x, y, width, height, focusWidth, arc );
+		paintOutlinedComponentImpl( g, x, y, width, height, focusWidth, focusWidthFraction, focusInnerWidth,
+			borderWidth, arc, focusColor, borderColor, background, scrollPane, systemScaleFactor );
 	}
 
-	private static void paintComponentBackgroundImpl( Graphics2D g, int x, int y, int width, int height,
-		float focusWidth, float arc )
+	@SuppressWarnings( "SelfAssignment" ) // Error Prone
+	private static void paintOutlinedComponentImpl( Graphics2D g, int x, int y, int width, int height,
+		float focusWidth, float focusWidthFraction, float focusInnerWidth, float borderWidth, float arc,
+		Paint focusColor, Paint borderColor, Paint background, boolean scrollPane, double scaleFactor )
 	{
-		g.fill( createComponentRectangle(
-			x + focusWidth, y + focusWidth,
-			width - focusWidth * 2, height - focusWidth * 2, arc ) );
+		// Special handling for scrollpane and fractional scale factors (e.g. 1.25 - 1.75),
+		// where Swing scales one "logical" pixel (border insets) to either one or two physical pixels.
+		// Antialiasing is used to paint the border, which usually needs two physical pixels
+		// at small scale factors. 1px for the solid border and another 1px for antialiasing.
+		// But scrollpane view is painted over the border, which results in a painted border
+		// that is 1px thick at some sides and 2px thick at other sides.
+		if( scrollPane && scaleFactor != (int) scaleFactor ) {
+			if( focusWidth > 0 ) {
+				// reduce outer border thickness (focusWidth) so that inner side of
+				// component border (focusWidth + borderWidth) is at a full pixel
+				int totalWidth = (int) (focusWidth + borderWidth);
+				focusWidth = totalWidth - borderWidth;
+			} else {// if( scaleFactor > 1 && scaleFactor < 2 ) {
+				// reduce component border thickness (borderWidth) to full pixels
+				borderWidth = (int) borderWidth;
+			}
+		}
+
+		// outside bounds of the border and the background
+		float x1 = x + focusWidth;
+		float y1 = y + focusWidth;
+		float w1 = width - focusWidth * 2;
+		float h1 = height - focusWidth * 2;
+
+		// fill background
+		//   bounds: x + focusWidth, y + focusWidth, width - (focusWidth * 2), height - (focusWidth * 2)
+		//   arc diameter: arc
+		if( background != null ) {
+			g.setPaint( background );
+			g.fill( createComponentRectangle( x1, y1, w1, h1, arc ) );
+		}
+
+		// optimization: paint focus border and border in single operation if colors are equal
+		if( borderColor != null && borderColor.equals( focusColor ) ) {
+			borderColor = null;
+			focusInnerWidth = Math.max( focusInnerWidth, borderWidth );
+		}
+
+		// paint focus border
+		//   outer bounds: x, y, width, height
+		//   thickness: focusWidth + focusInnerWidth
+		//   outer arc diameter: arc + (focusWidth * 2)
+		//   inner arc diameter: arc - (focusInnerWidth * 2)
+		float paintedFocusWidth = (focusWidth * focusWidthFraction) + focusInnerWidth;
+		if( focusColor != null && paintedFocusWidth != 0 ) {
+			// outside bounds of the focus border
+			float inset = focusWidth - (focusWidth * focusWidthFraction);
+			float x2 = x + inset;
+			float y2 = y + inset;
+			float w2 = width - (inset * 2);
+			float h2 = height - (inset * 2);
+
+			float outerArc = arc + (focusWidth * 2);
+			float innerArc = arc - (focusInnerWidth * 2);
+
+			// reduce outer arc slightly for small arcs to make the curve slightly wider
+			if( focusWidth > 0 && arc > 0 && arc < UIScale.scale( 10 ) )
+				outerArc -= UIScale.scale( 2f );
+
+			// consider focus width fraction
+			if( focusWidthFraction != 1 )
+				outerArc = arc + ((outerArc - arc) * focusWidthFraction);
+
+			g.setPaint( focusColor );
+			paintOutline( g, x2, y2, w2, h2, paintedFocusWidth, outerArc, innerArc );
+		}
+
+		// paint border
+		//   outer bounds: x + focusWidth, y + focusWidth, width - (focusWidth * 2), height - (focusWidth * 2)
+		//   thickness: borderWidth
+		//   outer arc diameter: arc
+		//   inner arc diameter: arc - (borderWidth * 2)
+		if( borderColor != null && borderWidth != 0 ) {
+			g.setPaint( borderColor );
+			paintOutline( g, x1, y1, w1, h1, borderWidth, arc );
+		}
 	}
 
 	/**
-	 * Creates a (rounded) rectangle used to paint components (border, background, etc).
+	 * Paints an outline at the given bounds using the given line width.
+	 * Depending on the given arc, a rectangle, rounded rectangle or circle (if w == h) is painted.
+	 *
+	 * @param g the graphics context used for painting
+	 * @param x the x coordinate of the outline
+	 * @param y the y coordinate of the outline
+	 * @param w the width of the outline
+	 * @param h the height of the outline
+	 * @param lineWidth the width of the outline
+	 * @param arc the arc diameter used for the outside shape of the outline
+	 *
+	 * @since 2
+	 */
+	public static void paintOutline( Graphics2D g, float x, float y, float w, float h,
+		float lineWidth, float arc )
+	{
+		paintOutline( g, x, y, w, h, lineWidth, arc, arc - (lineWidth * 2) );
+	}
+
+	/**
+	 * Paints an outline at the given bounds using the given line width.
+	 * Depending on the given arc, a rectangle, rounded rectangle or circle (if w == h) is painted.
+	 *
+	 * @param g the graphics context used for painting
+	 * @param x the x coordinate of the outline
+	 * @param y the y coordinate of the outline
+	 * @param w the width of the outline
+	 * @param h the height of the outline
+	 * @param lineWidth the width of the outline
+	 * @param arc the arc diameter used for the outside shape of the outline
+	 * @param innerArc the arc diameter used for the inside shape of the outline
+	 *
+	 * @since 2
+	 */
+	public static void paintOutline( Graphics2D g, float x, float y, float w, float h,
+		float lineWidth, float arc, float innerArc )
+	{
+		if( lineWidth == 0 || w <= 0 || h <= 0 )
+			return;
+
+		float t = lineWidth;
+		float t2x = t * 2;
+
+		Path2D border = new Path2D.Float( Path2D.WIND_EVEN_ODD );
+		border.append( createComponentRectangle( x, y, w, h, arc ), false );
+		border.append( createComponentRectangle( x + t, y + t, w - t2x, h - t2x, innerArc ), false );
+		g.fill( border );
+	}
+
+	/**
+	 * Creates a (rounded) rectangle used to paint components (border, background, etc.).
 	 * The given arc diameter is limited to min(width,height).
 	 */
 	public static Shape createComponentRectangle( float x, float y, float w, float h, float arc ) {
 		if( arc <= 0 )
 			return new Rectangle2D.Float( x, y, w, h );
+
+		if( w == h && arc >= w )
+			return new Ellipse2D.Float( x, y, w, h );
 
 		arc = Math.min( arc, Math.min( w, h ) );
 		return new RoundRectangle2D.Float( x, y, w, h, arc, arc );
@@ -501,12 +805,56 @@ public class FlatUIUtils
 		}
 	}
 
+	/**
+	 * Paints a selection.
+	 * <p>
+	 * The bounds of the painted selection (rounded) rectangle are
+	 * {@code x + insets.left, y + insets.top, width - insets.left - insets.right, height - insets.top - insets.bottom}.
+	 * The given arc radius refers to the painted rectangle (and not to {@code x,y,width,height}).
+	 *
+	 * @since 3
+	 */
+	public static void paintSelection( Graphics2D g, int x, int y, int width, int height, Insets insets,
+		float arcTopLeft, float arcTopRight, float arcBottomLeft, float arcBottomRight, int flags )
+	{
+		if( insets != null ) {
+			x += insets.left;
+			y += insets.top;
+			width -= insets.left + insets.right;
+			height -= insets.top + insets.bottom;
+		}
+
+		if( arcTopLeft > 0 || arcTopRight > 0 || arcBottomLeft > 0 || arcBottomRight > 0 ) {
+			double systemScaleFactor = UIScale.getSystemScaleFactor( g );
+			if( systemScaleFactor != (int) systemScaleFactor ) {
+				// paint at scale 1x to avoid clipping on right and bottom edges at 125%, 150% or 175%
+				HiDPIUtils.paintAtScale1x( g, x, y, width, height,
+					(g2d, x2, y2, width2, height2, scaleFactor) -> {
+						paintRoundedSelectionImpl( g2d, x2, y2, width2, height2,
+							(float) (arcTopLeft * scaleFactor), (float) (arcTopRight * scaleFactor),
+							(float) (arcBottomLeft * scaleFactor), (float) (arcBottomRight * scaleFactor) );
+					} );
+			} else
+				paintRoundedSelectionImpl( g, x, y, width, height, arcTopLeft, arcTopRight, arcBottomLeft, arcBottomRight );
+
+		} else
+			g.fillRect( x, y, width, height );
+	}
+
+	private static void paintRoundedSelectionImpl( Graphics2D g, int x, int y, int width, int height,
+		float arcTopLeft, float arcTopRight, float arcBottomLeft, float arcBottomRight )
+	{
+		Object[] oldRenderingHints = FlatUIUtils.setRenderingHints( g );
+		g.fill( FlatUIUtils.createRoundRectanglePath( x, y, width, height, arcTopLeft, arcTopRight, arcBottomLeft, arcBottomRight ) );
+		FlatUIUtils.resetRenderingHints( g, oldRenderingHints );
+	}
+
 	public static void paintGrip( Graphics g, int x, int y, int width, int height,
 		boolean horizontal, int dotCount, int dotSize, int gap, boolean centerPrecise )
 	{
 		dotSize = UIScale.scale( dotSize );
 		gap = UIScale.scale( gap );
-		int gripSize = (dotSize * dotCount) + ((gap * (dotCount - 1)));
+		int gripSize = (dotSize * dotCount) + (gap * (dotCount - 1));
 
 		// calculate grip position
 		float gx;
@@ -541,9 +889,9 @@ public class FlatUIUtils
 	 * is smaller than its bounds (for the focus decoration).
 	 */
 	public static void paintParentBackground( Graphics g, JComponent c ) {
-		Container parent = findOpaqueParent( c );
-		if( parent != null ) {
-			g.setColor( parent.getBackground() );
+		Color background = getParentBackground( c );
+		if( background != null ) {
+			g.setColor( background );
 			g.fillRect( 0, 0, c.getWidth(), c.getHeight() );
 		}
 	}
@@ -553,9 +901,20 @@ public class FlatUIUtils
 	 */
 	public static Color getParentBackground( JComponent c ) {
 		Container parent = findOpaqueParent( c );
-		return (parent != null)
-			? parent.getBackground()
-			: UIManager.getColor( "Panel.background" ); // fallback, probably never used
+		// parent.getBackground() may return null
+		// (e.g. for Swing delegate components used for AWT components on macOS)
+		Color background = (parent != null) ? parent.getBackground() : null;
+		if( background != null )
+			return background;
+
+		if( isAWTPeer( c ) ) {
+			// AWT peers usually use component background, except for TextField and ScrollPane
+			return c instanceof JTextField || c instanceof JScrollPane || c.getBackground() == null
+				? SystemColor.window
+				: c.getBackground();
+		}
+
+		return UIManager.getColor( "Panel.background" );
 	}
 
 	/**
@@ -581,7 +940,7 @@ public class FlatUIUtils
 	}
 
 	/**
-	 * Creates a not-filled rounded rectangle shape and allows specifying the line width and the radius or each corner.
+	 * Creates a not-filled rounded rectangle shape and allows specifying the line width and the radius of each corner.
 	 */
 	public static Path2D createRoundRectangle( float x, float y, float width, float height,
 		float lineWidth, float arcTopLeft, float arcTopRight, float arcBottomLeft, float arcBottomRight )
@@ -620,7 +979,7 @@ public class FlatUIUtils
 		double ciBottomLeft = arcBottomLeft * ci;
 		double ciBottomRight = arcBottomRight * ci;
 
-		Path2D rect = new Path2D.Float();
+		Path2D rect = new Path2D.Float( Path2D.WIND_NON_ZERO, 16 );
 		rect.moveTo(  x2 - arcTopRight, y );
 		rect.curveTo( x2 - ciTopRight, y,
 					  x2, y + ciTopRight,
@@ -643,6 +1002,27 @@ public class FlatUIUtils
 	}
 
 	/**
+	 * Creates a rounded triangle shape for the given points and arc radius.
+	 *
+	 * @since 3
+	 */
+	public static Shape createRoundTrianglePath( float x1, float y1, float x2, float y2,
+		float x3, float y3, float arc )
+	{
+		double averageSideLength = (distance( x1,y1, x2,y2 ) + distance( x2,y2, x3,y3 ) + distance( x3,y3, x1,y1 )) / 3;
+		double t1 = (1 / averageSideLength) * arc;
+		double t2 = 1 - t1;
+
+		return createPath(
+			lerp( x3, x1, t2 ), lerp( y3, y1, t2 ),
+			QUAD_TO, x1, y1, lerp( x1, x2, t1 ), lerp( y1, y2, t1 ),
+			lerp( x1, x2, t2 ), lerp( y1, y2, t2 ),
+			QUAD_TO, x2, y2, lerp( x2, x3, t1 ), lerp( y2, y3, t1 ),
+			lerp( x2, x3, t2 ), lerp( y2, y3, t2 ),
+			QUAD_TO, x3, y3, lerp( x3, x1, t1 ), lerp( y3, y1, t1 ) );
+	}
+
+	/**
 	 * Paints a chevron or triangle arrow in the center of the given rectangle.
 	 *
 	 * @param g the graphics context used for painting
@@ -654,22 +1034,26 @@ public class FlatUIUtils
 	 *        {@link SwingConstants#WEST} or {@link SwingConstants#EAST})
 	 * @param chevron {@code true} for chevron arrow, {@code false} for triangle arrow
 	 * @param arrowSize the width of the painted arrow (for vertical direction) (will be scaled)
-	 * @param xOffset a offset added to the x coordinate of the arrow to paint it out-of-center. Usually zero. (will be scaled)
-	 * @param yOffset a offset added to the y coordinate of the arrow to paint it out-of-center. Usually zero. (will be scaled)
+	 * @param arrowThickness the thickness of the painted chevron arrow (will be scaled)
+	 * @param xOffset an offset added to the x coordinate of the arrow to paint it out-of-center. Usually zero. (will be scaled)
+	 * @param yOffset an offset added to the y coordinate of the arrow to paint it out-of-center. Usually zero. (will be scaled)
 	 *
-	 * @since 1.1
+	 * @since 3
 	 */
 	public static void paintArrow( Graphics2D g, int x, int y, int width, int height,
-		int direction, boolean chevron, int arrowSize, int xOffset, int yOffset )
+		int direction, boolean chevron, int arrowSize, float arrowThickness,
+		float xOffset, float yOffset )
 	{
 		// compute arrow width/height
-		int aw = UIScale.scale( arrowSize + (chevron ? 0 : 1) );
-		int ah = UIScale.scale( (arrowSize / 2) + (chevron ? 0 : 1) );
+		// - make chevron arrows one pixel smaller because coordinates are based on center of pixels (0.5/0.5)
+		// - make triangle arrows one pixel taller (and round height up) to make them look stronger
+		float aw = UIScale.scale( arrowSize + (chevron ? -1 : 0) );
+		float ah = chevron ? (aw / 2) : UIScale.scale( (arrowSize / 2) + 1 );
 
 		// rotate arrow width/height for horizontal directions
 		boolean vert = (direction == SwingConstants.NORTH || direction == SwingConstants.SOUTH);
 		if( !vert ) {
-			int temp = aw;
+			float temp = aw;
 			aw = ah;
 			ah = temp;
 		}
@@ -679,19 +1063,21 @@ public class FlatUIUtils
 		int extra = chevron ? 1 : 0;
 
 		// compute arrow location
-		int ax = x + Math.round( ((width - (aw + extra)) / 2f) + UIScale.scale( (float) xOffset ) );
-		int ay = y + Math.round( ((height - (ah + extra)) / 2f) + UIScale.scale( (float) yOffset ) );
+		float ox = ((width - (aw + extra)) / 2f) + UIScale.scale( xOffset );
+		float oy = ((height - (ah + extra)) / 2f) + UIScale.scale( yOffset );
+		float ax = x + ((direction == SwingConstants.WEST) ? -Math.round( -(ox + aw) ) - aw : Math.round( ox ));
+		float ay = y + ((direction == SwingConstants.NORTH) ? -Math.round( -(oy + ah) ) - ah : Math.round( oy ));
 
 		// paint arrow
 		g.translate( ax, ay );
 /*debug
-		debugPaintArrow( g, Color.red, vert, aw + extra, ah + extra );
+		debugPaintArrow( g, Color.red, vert, Math.round( aw + extra ), Math.round( ah + extra ) );
 debug*/
 		Shape arrowShape = createArrowShape( direction, chevron, aw, ah );
 		if( chevron ) {
 			Stroke oldStroke = g.getStroke();
-			g.setStroke( new BasicStroke( UIScale.scale( 1f ) ) );
-			g.draw( arrowShape );
+			g.setStroke( new BasicStroke( UIScale.scale( arrowThickness ) ) );
+			drawShapePure( g, arrowShape );
 			g.setStroke( oldStroke );
 		} else {
 			// triangle
@@ -703,7 +1089,7 @@ debug*/
 	/**
 	 * Creates a chevron or triangle arrow shape for the given direction and size.
 	 * <p>
-	 * The chevron shape is a open path that can be painted with {@link Graphics2D#draw(Shape)}.
+	 * The chevron shape is an open path that can be painted with {@link Graphics2D#draw(Shape)}.
 	 * The triangle shape is a close path that can be painted with {@link Graphics2D#fill(Shape)}.
 	 *
 	 * @param direction the arrow direction ({@link SwingConstants#NORTH}, {@link SwingConstants#SOUTH}
@@ -747,6 +1133,12 @@ debug*/
 	}
 debug*/
 
+	/** @since 3 */ public static final double MOVE_TO    = -1_000_000_000_001.;
+	/** @since 3 */ public static final double QUAD_TO    = -1_000_000_000_002.;
+	/** @since 3 */ public static final double CURVE_TO   = -1_000_000_000_003.;
+	/** @since 3 */ public static final double ROUNDED    = -1_000_000_000_004.;
+	/** @since 3 */ public static final double CLOSE_PATH = -1_000_000_000_005.;
+
 	/**
 	 * Creates a closed path for the given points.
 	 */
@@ -755,16 +1147,106 @@ debug*/
 	}
 
 	/**
-	 * Creates a open or closed path for the given points.
+	 * Creates an open or closed path for the given points.
 	 */
 	public static Path2D createPath( boolean close, double... points ) {
-		Path2D path = new Path2D.Float();
+		Path2D path = new Path2D.Float( Path2D.WIND_NON_ZERO, points.length / 2 + (close ? 1 : 0) );
 		path.moveTo( points[0], points[1] );
-		for( int i = 2; i < points.length; i += 2 )
-			path.lineTo( points[i], points[i + 1] );
+		for( int i = 2; i < points.length; ) {
+			double p = points[i];
+			if( p == MOVE_TO ) {
+				// move pointer to
+				//    params: x, y
+				path.moveTo( points[i + 1], points[i + 2] );
+				i += 3;
+			} else if( p == QUAD_TO ) {
+				// add quadratic curve
+				//    params: x1, y1, x2, y2
+				path.quadTo( points[i + 1], points[i + 2], points[i + 3], points[i + 4] );
+				i += 5;
+			} else if( p == CURVE_TO ) {
+				// add bezier curve
+				//    params: x1, y1, x2, y2, x3, y3
+				path.curveTo( points[i + 1], points[i + 2], points[i + 3], points[i + 4], points[i + 5], points[i + 6] );
+				i += 7;
+			} else if( p == ROUNDED ) {
+				// add rounded corner
+				//    params: x, y, arc
+				double x = points[i + 1];
+				double y = points[i + 2];
+				double arc = points[i + 3];
+
+				// index of next point
+				int ip2 = i + 4;
+				if( points[ip2] == QUAD_TO || points[ip2] == ROUNDED )
+					ip2++;
+
+				// previous and next points
+				Point2D p1 = path.getCurrentPoint();
+				double x1 = p1.getX();
+				double y1 = p1.getY();
+				double x2 = points[ip2];
+				double y2 = points[ip2 + 1];
+
+				double d1 = distance( x, y, x1, y1 );
+				double d2 = distance( x, y, x2, y2 );
+				double t1 = 1 - ((1 / d1) * arc);
+				double t2 = (1 / d2) * arc;
+
+				path.lineTo( lerp( x1, x, t1 ), lerp( y1, y, t1 ) );
+				path.quadTo( x, y, lerp( x, x2, t2 ), lerp( y, y2, t2 ) );
+
+				i += 4;
+			} else if( p == CLOSE_PATH ) {
+				// close path
+				//    params: -
+				path.closePath();
+				i += 1;
+			} else {
+				// add line to
+				//    params: x, y
+				path.lineTo( p, points[i + 1] );
+				i += 2;
+			}
+		}
 		if( close )
 			path.closePath();
 		return path;
+	}
+
+	/**
+	 * Calculates linear interpolation between two values.
+	 *
+	 * https://en.wikipedia.org/wiki/Linear_interpolation#Programming_language_support
+	 */
+	private static double lerp( double v1, double v2, double t ) {
+		return (v1 * (1 - t)) + (v2 * t);
+	}
+
+	/**
+	 * Calculates the distance between two points.
+	 */
+	private static double distance( double x1, double y1, double x2, double y2 ) {
+		double dx = x2 - x1;
+		double dy = y2 - y1;
+		return Math.sqrt( (dx * dx) + (dy * dy) );
+	}
+
+	/**
+	 * Draws the given shape with disabled stroke normalization.
+	 * The x/y coordinates of the shape are translated by a half pixel.
+	 *
+	 * @since 2.1
+	 */
+	public static void drawShapePure( Graphics2D g, Shape shape ) {
+		Object oldStrokeControl = g.getRenderingHint( RenderingHints.KEY_STROKE_CONTROL );
+		g.setRenderingHint( RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE );
+
+		g.translate( 0.5, 0.5 );
+		g.draw( shape );
+		g.translate( -0.5, -0.5 );
+
+		g.setRenderingHint( RenderingHints.KEY_STROKE_CONTROL, oldStrokeControl );
 	}
 
 	/**
@@ -819,6 +1301,27 @@ debug*/
 	}
 
 	/**
+	 * Returns whether shared UI delegates are used.
+	 *
+	 * @since 1.6
+	 */
+	public static boolean isUseSharedUIs() {
+		return useSharedUIs;
+	}
+
+	/**
+	 * Specifies whether shared UI delegates are used.
+	 * This does not change already existing UI delegates.
+	 *
+	 * @since 1.6
+	 */
+	public static boolean setUseSharedUIs( boolean useSharedUIs ) {
+		boolean old = FlatUIUtils.useSharedUIs;
+		FlatUIUtils.useSharedUIs = useSharedUIs;
+		return old;
+	}
+
+	/**
 	 * Creates a shared component UI for the given key and the current Laf.
 	 * Each Laf instance has its own shared component UI instance.
 	 * <p>
@@ -826,9 +1329,20 @@ debug*/
 	 * may use multiple Laf instances at the same time.
 	 */
 	public static ComponentUI createSharedUI( Object key, Supplier<ComponentUI> newInstanceSupplier ) {
+		if( !useSharedUIs )
+			return newInstanceSupplier.get();
+
 		return sharedUIinstances
 			.computeIfAbsent( UIManager.getLookAndFeel(), k -> new IdentityHashMap<>() )
 			.computeIfAbsent( key, k -> newInstanceSupplier.get() );
+	}
+
+	/**
+	 * Returns whether the component UI for the given component can be shared
+	 * with other components. This is only possible if it does not have styles.
+	 */
+	public static boolean canUseSharedUI( JComponent c ) {
+		return !FlatStylingSupport.hasStyleProperty( c );
 	}
 
 	//---- class RepaintFocusListener -----------------------------------------
@@ -837,19 +1351,50 @@ debug*/
 		implements FocusListener
 	{
 		private final Component repaintComponent;
+		private final Predicate<Component> repaintCondition;
 
-		public RepaintFocusListener( Component repaintComponent ) {
+		public RepaintFocusListener( Component repaintComponent, Predicate<Component> repaintCondition ) {
 			this.repaintComponent = repaintComponent;
+			this.repaintCondition = repaintCondition;
 		}
 
 		@Override
 		public void focusGained( FocusEvent e ) {
-			repaintComponent.repaint();
+			if( repaintCondition == null || repaintCondition.test( repaintComponent ) )
+				HiDPIUtils.repaint( repaintComponent );
 		}
 
 		@Override
 		public void focusLost( FocusEvent e ) {
-			repaintComponent.repaint();
+			if( repaintCondition == null || repaintCondition.test( repaintComponent ) )
+				HiDPIUtils.repaint( repaintComponent );
+		}
+	}
+
+	//---- class NonUIResourceBorder ------------------------------------------
+
+	private static class NonUIResourceBorder
+		implements Border
+	{
+		private final Border delegate;
+
+		NonUIResourceBorder( Border delegate ) {
+			this.delegate = delegate;
+		}
+
+		@Override
+		public void paintBorder( Component c, Graphics g, int x, int y, int width, int height ) {
+			delegate.paintBorder( c, g, x, y, width, height );
+		}
+
+		@Override
+		public Insets getBorderInsets( Component c ) {
+			return delegate.getBorderInsets( c );
+		}
+
+		@Override
+		public boolean isBorderOpaque() {
+			return delegate.isBorderOpaque();
 		}
 	}
 }

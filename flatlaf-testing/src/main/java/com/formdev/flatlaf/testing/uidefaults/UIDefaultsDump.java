@@ -22,16 +22,20 @@ import java.awt.Font;
 import java.awt.Insets;
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.io.Reader;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.io.Writer;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -42,19 +46,9 @@ import java.util.Objects;
 import java.util.Properties;
 import java.util.TreeSet;
 import java.util.function.Predicate;
-import javax.swing.Icon;
-import javax.swing.ImageIcon;
-import javax.swing.InputMap;
-import javax.swing.JComponent;
-import javax.swing.JInternalFrame;
-import javax.swing.JToolBar;
-import javax.swing.KeyStroke;
-import javax.swing.ListCellRenderer;
-import javax.swing.LookAndFeel;
-import javax.swing.UIDefaults;
+import javax.swing.*;
 import javax.swing.UIDefaults.ActiveValue;
 import javax.swing.UIDefaults.LazyValue;
-import javax.swing.UIManager;
 import javax.swing.UIManager.LookAndFeelInfo;
 import javax.swing.border.Border;
 import javax.swing.border.CompoundBorder;
@@ -62,14 +56,17 @@ import javax.swing.border.LineBorder;
 import javax.swing.plaf.BorderUIResource;
 import javax.swing.plaf.UIResource;
 import javax.swing.plaf.basic.BasicLookAndFeel;
+import javax.swing.table.JTableHeader;
 import com.formdev.flatlaf.*;
 import com.formdev.flatlaf.intellijthemes.FlatAllIJThemes;
 import com.formdev.flatlaf.testing.FlatTestLaf;
+import com.formdev.flatlaf.themes.*;
 import com.formdev.flatlaf.ui.FlatLineBorder;
 import com.formdev.flatlaf.ui.FlatUIUtils;
 import com.formdev.flatlaf.util.ColorFunctions.ColorFunction;
 import com.jidesoft.plaf.LookAndFeelFactory;
 import com.formdev.flatlaf.util.DerivedColor;
+import com.formdev.flatlaf.util.HSLColor;
 import com.formdev.flatlaf.util.StringUtils;
 import com.formdev.flatlaf.util.SystemInfo;
 
@@ -84,6 +81,7 @@ public class UIDefaultsDump
 	private final UIDefaults defaults;
 	private final Properties derivedColorKeys;
 	private final boolean isIntelliJTheme;
+	private final boolean dumpHSL;
 
 	private String lastPrefix;
 	private JComponent dummyComponent;
@@ -101,6 +99,9 @@ public class UIDefaultsDump
 		if( SystemInfo.isWindows ) {
 			dump( FlatIntelliJLaf.class.getName(), dir, false );
 			dump( FlatDarculaLaf.class.getName(), dir, false );
+
+			dump( FlatMacLightLaf.class.getName(), dir, false );
+			dump( FlatMacDarkLaf.class.getName(), dir, false );
 		}
 
 		dump( FlatTestLaf.class.getName(), dir, false );
@@ -118,15 +119,20 @@ public class UIDefaultsDump
 //
 //		dump( "com.jgoodies.looks.plastic.PlasticLookAndFeel", dir, false );
 //		dump( "com.jgoodies.looks.windows.WindowsLookAndFeel", dir, false );
-//		dump( "com.alee.laf.WebLookAndFeel", dir, false );
 //		try {
-//			EventQueue.invokeAndWait( () -> {
-//				dump( "org.pushingpixels.substance.api.skin.SubstanceGraphiteAquaLookAndFeel", dir, false );
+//			SwingUtilities.invokeAndWait( () -> {
+//				dump( "org.pushingpixels.radiance.theming.api.skin.RadianceGraphiteAquaLookAndFeel", dir, false );
 //			} );
 //		} catch( Exception ex ) {
 //			// TODO Auto-generated catch block
 //			ex.printStackTrace();
 //		}
+
+		// used to test whether system color influences IntelliJ themes
+		// (first run without this, save result, run with this and compare outputs)
+//		FlatLaf.setSystemColorGetter( name -> {
+//			return Color.red;
+//		} );
 
 //		dumpIntelliJThemes( dir );
 
@@ -177,8 +183,10 @@ public class UIDefaultsDump
 
 		dump( dir, "", lookAndFeel, defaults, key -> !key.contains( "InputMap" ) );
 
-		if( lookAndFeel.getClass() == FlatLightLaf.class || !(lookAndFeel instanceof FlatLaf) )
+		if( lookAndFeel.getClass() == FlatLightLaf.class || !(lookAndFeel instanceof FlatLaf) ) {
 			dump( dir, "_InputMap", lookAndFeel, defaults, key -> key.contains( "InputMap" ) );
+			dumpActionMaps( dir, "_ActionMap", lookAndFeel, defaults );
+		}
 	}
 
 	private static void dump( File dir, String nameSuffix,
@@ -197,6 +205,8 @@ public class UIDefaultsDump
 				? "-linux"
 				: "");
 		String javaVersion = System.getProperty( "java.version" );
+		if( javaVersion.startsWith( "1.8.0_" ) && lookAndFeel instanceof FlatLaf )
+			javaVersion = "1.8.0";
 		File file = new File( dir, name + nameSuffix + "_"
 			+ javaVersion + osSuffix + ".txt" );
 
@@ -215,7 +225,8 @@ public class UIDefaultsDump
 		}
 		if( origFile != null ) {
 			try {
-				Map<String, String> defaults1 = parse( new FileReader( origFile ) );
+				Map<String, String> defaults1 = parse( new InputStreamReader(
+					new FileInputStream( origFile ), StandardCharsets.UTF_8 ) );
 				Map<String, String> defaults2 = parse( new StringReader( stringWriter.toString() ) );
 
 				content = diff( defaults1, defaults2 );
@@ -228,8 +239,37 @@ public class UIDefaultsDump
 
 		// write to file
 		file.getParentFile().mkdirs();
-		try( FileWriter fileWriter = new FileWriter( file ) ) {
+		try( Writer fileWriter = new OutputStreamWriter(
+			new FileOutputStream( file ), StandardCharsets.UTF_8 ) )
+		{
 			fileWriter.write( content );
+		} catch( IOException ex ) {
+			ex.printStackTrace();
+		}
+	}
+
+	private static void dumpActionMaps( File dir, String nameSuffix,
+		LookAndFeel lookAndFeel, UIDefaults defaults )
+	{
+		// dump to string
+		StringWriter stringWriter = new StringWriter( 100000 );
+		new UIDefaultsDump( lookAndFeel, defaults ).dumpActionMaps( new PrintWriter( stringWriter ) );
+
+		String name = lookAndFeel instanceof MyBasicLookAndFeel
+			? BasicLookAndFeel.class.getSimpleName()
+			: lookAndFeel.getClass().getSimpleName();
+		String javaVersion = System.getProperty( "java.version" );
+		if( javaVersion.startsWith( "1.8.0_" ) && lookAndFeel instanceof FlatLaf )
+			javaVersion = "1.8.0";
+		File file = new File( dir, name + nameSuffix + "_"
+			+ javaVersion + ".txt" );
+
+		// write to file
+		file.getParentFile().mkdirs();
+		try( Writer fileWriter = new OutputStreamWriter(
+			new FileOutputStream( file ), StandardCharsets.UTF_8 ) )
+		{
+			fileWriter.write( stringWriter.toString().replace( "\r", "" ) );
 		} catch( IOException ex ) {
 			ex.printStackTrace();
 		}
@@ -349,9 +389,10 @@ public class UIDefaultsDump
 
 		derivedColorKeys = loadDerivedColorKeys();
 		isIntelliJTheme = (lookAndFeel instanceof IntelliJTheme.ThemeLaf);
+		dumpHSL = lookAndFeel instanceof FlatLaf;
 	}
 
-	private void dump( PrintWriter out, Predicate<String> keyFilter ) {
+	private void dumpHeader( PrintWriter out ) {
 		Class<?> lookAndFeelClass = lookAndFeel instanceof MyBasicLookAndFeel
 			? BasicLookAndFeel.class
 			: lookAndFeel.getClass();
@@ -360,6 +401,10 @@ public class UIDefaultsDump
 		out.printf( "Name   %s%n", lookAndFeel.getName() );
 		out.printf( "Java   %s%n", System.getProperty( "java.version" ) );
 		out.printf( "OS     %s%n", System.getProperty( "os.name" ) );
+	}
+
+	private void dump( PrintWriter out, Predicate<String> keyFilter ) {
+		dumpHeader( out );
 
 		defaults.entrySet().stream()
 			.sorted( (key1, key2) -> {
@@ -370,7 +415,7 @@ public class UIDefaultsDump
 				Object value = entry.getValue();
 
 				String strKey = String.valueOf( key );
-				if( !keyFilter.test( strKey ) )
+				if( !keyFilter.test( strKey ) || strKey.startsWith( "FlatLaf.internal." ) )
 					return;
 
 				String prefix = keyPrefix( strKey );
@@ -383,6 +428,59 @@ public class UIDefaultsDump
 				dumpValue( out, strKey, value );
 				out.println();
 			} );
+	}
+
+	private void dumpActionMaps( PrintWriter out ) {
+		dumpHeader( out );
+
+		dumpActionMap( out, new JButton() );
+		dumpActionMap( out, new JCheckBox() );
+		dumpActionMap( out, new JCheckBoxMenuItem() );
+		dumpActionMap( out, new JColorChooser() );
+		dumpActionMap( out, new JComboBox<>() );
+		dumpActionMap( out, new JDesktopPane() );
+		dumpActionMap( out, new JEditorPane() );
+		dumpActionMap( out, new JFileChooser() );
+		dumpActionMap( out, new JFormattedTextField() );
+		dumpActionMap( out, new JInternalFrame() );
+		dumpActionMap( out, new JLabel() );
+		dumpActionMap( out, new JList<>() );
+		dumpActionMap( out, new JMenu() );
+		dumpActionMap( out, new JMenuBar() );
+		dumpActionMap( out, new JMenuItem() );
+		dumpActionMap( out, new JOptionPane() );
+		dumpActionMap( out, new JPanel() );
+		dumpActionMap( out, new JPasswordField() );
+		dumpActionMap( out, new JPopupMenu() );
+		dumpActionMap( out, new JProgressBar() );
+		dumpActionMap( out, new JRadioButton() );
+		dumpActionMap( out, new JRadioButtonMenuItem() );
+		dumpActionMap( out, new JRootPane() );
+		dumpActionMap( out, new JScrollBar() );
+		dumpActionMap( out, new JScrollPane() );
+		dumpActionMap( out, new JSeparator() );
+		dumpActionMap( out, new JSlider() );
+		dumpActionMap( out, new JSpinner() );
+		dumpActionMap( out, new JSplitPane() );
+		dumpActionMap( out, new JTabbedPane() );
+		dumpActionMap( out, new JTable() );
+		dumpActionMap( out, new JTableHeader() );
+		dumpActionMap( out, new JTextArea() );
+		dumpActionMap( out, new JTextField() );
+		dumpActionMap( out, new JTextPane() );
+		dumpActionMap( out, new JToggleButton() );
+		dumpActionMap( out, new JToolBar() );
+		dumpActionMap( out, new JToolTip() );
+		dumpActionMap( out, new JTree() );
+		dumpActionMap( out, new JViewport() );
+	}
+
+	private void dumpActionMap( PrintWriter out, JComponent c ) {
+		out.printf( "%n%n%n#---- %s ----%n%n", c.getClass().getName() );
+
+		ActionMap actionMap = SwingUtilities.getUIActionMap( c );
+		if( actionMap != null )
+			dumpActionMap( out, actionMap, null );
 	}
 
 	private static String keyPrefix( String key ) {
@@ -404,7 +502,7 @@ public class UIDefaultsDump
 		} else if( value instanceof Character ) {
 			char ch = ((Character)value).charValue();
 			if( ch >= ' ' && ch <= '~' )
-				out.printf( "'%c'", value );
+				out.printf( "'%c'", ch );
 			else
 				out.printf( "'\\u%h'", (int) ch );
 		} else if( value.getClass().isArray() )
@@ -453,20 +551,22 @@ public class UIDefaultsDump
 	}
 
 	private void dumpColor( PrintWriter out, String key, Color color ) {
-		Color resolvedColor = resolveDerivedColor( key, color );
+		Color[] retBaseColor = new Color[1];
+		Color resolvedColor = resolveDerivedColor( key, color, retBaseColor );
 		if( resolvedColor != color && resolvedColor.getRGB() != color.getRGB() ) {
 			if( !isIntelliJTheme ) {
 				System.err.println( "Key '" + key + "': derived colors not equal" );
-				System.err.println( "  Default color:  " + dumpColorHex( color ) );
-				System.err.println( "  Resolved color: " + dumpColorHex( resolvedColor ) );
+				System.err.println( "  Default color:  " + dumpColorHexAndHSL( color ) );
+				System.err.println( "  Resolved color: " + dumpColorHexAndHSL( resolvedColor ) );
+				System.err.println( "  Base color:     " + dumpColorHexAndHSL( retBaseColor[0] ) );
 			}
 
 			out.printf( "%s / ",
-				dumpColorHex( resolvedColor ) );
+				dumpColorHexAndHSL( resolvedColor ) );
 		}
 
 		out.printf( "%s    %s",
-			dumpColorHex( color ),
+			dumpColorHexAndHSL( color ),
 			dumpClass( color ) );
 
 		if( color instanceof DerivedColor ) {
@@ -479,11 +579,33 @@ public class UIDefaultsDump
 		}
 	}
 
+	private String dumpColorHexAndHSL( Color color ) {
+		String hex = dumpColorHex( color );
+		return dumpHSL
+			? hex + "  " + dumpColorHSL( color )
+			: hex;
+	}
+
 	private String dumpColorHex( Color color ) {
 		boolean hasAlpha = (color.getAlpha() != 255);
 		return hasAlpha
 			? String.format( "#%06x%02x  %d%%", color.getRGB() & 0xffffff, (color.getRGB() >> 24) & 0xff, Math.round( color.getAlpha() / 2.55f ) )
 			: String.format( "#%06x", color.getRGB() & 0xffffff );
+	}
+
+	private String dumpColorHSL( Color color ) {
+		HSLColor hslColor = new HSLColor( color );
+		int hue = Math.round( hslColor.getHue() );
+		int saturation = Math.round( hslColor.getSaturation() );
+		int luminance = Math.round( hslColor.getLuminance() );
+		if( color.getAlpha() == 255 ) {
+			return String.format( "HSL %3d %3d %3d",
+				hue, saturation, luminance );
+		} else {
+			int alpha = Math.round( hslColor.getAlpha() * 100 );
+			return String.format( "HSLA %3d %3d %3d %2d",
+				hue, saturation, luminance, alpha );
+		}
 	}
 
 	private void dumpFont( PrintWriter out, Font font ) {
@@ -550,7 +672,7 @@ public class UIDefaultsDump
 
 			switch( borderClassName ) {
 				case "com.apple.laf.AquaToolBarUI$ToolBarBorder":
-				case "org.pushingpixels.substance.internal.utils.border.SubstanceToolBarBorder":
+				case "org.pushingpixels.radiance.theming.internal.utils.border.RadianceToolBarBorder":
 					c = new JToolBar();
 					break;
 
@@ -605,8 +727,38 @@ public class UIDefaultsDump
 		}
 
 		InputMap parent = inputMap.getParent();
-		if( parent != null )
+		if( parent != null ) {
+			out.printf( "%n%n%s", indent );
 			dumpInputMap( out, parent, indent + "    " );
+		}
+	}
+
+	private void dumpActionMap( PrintWriter out, ActionMap actionMap, String indent ) {
+		if( indent == null )
+			indent = "    ";
+
+		out.printf( "%-2d      %s", actionMap.size(), dumpClass( actionMap ) );
+
+		Object[] keys = actionMap.keys();
+		if( keys != null ) {
+			Arrays.sort( keys, (key1, key2) -> {
+				return String.valueOf( key1 ).compareTo( String.valueOf( key2 ) );
+			} );
+			for( Object key : keys ) {
+				Action action = actionMap.get( key );
+				out.printf( "%n%s%-35s  %s", indent, key, action.getClass().getName() );
+
+				Object name = action.getValue( Action.NAME );
+				if( !Objects.equals( name, key ) )
+					out.printf( " (%s)", name );
+			}
+		}
+
+		ActionMap parent = actionMap.getParent();
+		if( parent != null ) {
+			out.printf( "%n%n%s", indent );
+			dumpActionMap( out, parent, indent + "    " );
+		}
 	}
 
 	private void dumpLazyValue( PrintWriter out, LazyValue value ) {
@@ -645,7 +797,7 @@ public class UIDefaultsDump
 		return properties;
 	}
 
-	private Color resolveDerivedColor( String key, Color color ) {
+	private Color resolveDerivedColor( String key, Color color, Color[] retBaseColor ) {
 		if( !(color instanceof DerivedColor) )
 			return color;
 
@@ -666,7 +818,9 @@ public class UIDefaultsDump
 			throw new IllegalStateException( "Missing base color '" + baseKey + "' for key '" + key + "'." );
 
 		if( baseColor instanceof DerivedColor )
-			baseColor = resolveDerivedColor( (String) baseKey, baseColor );
+			baseColor = resolveDerivedColor( (String) baseKey, baseColor, retBaseColor );
+
+		retBaseColor[0] = baseColor;
 
 		Color newColor = FlatUIUtils.deriveColor( color, baseColor );
 

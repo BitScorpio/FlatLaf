@@ -17,18 +17,22 @@
 package com.formdev.flatlaf;
 
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsEnvironment;
 import java.awt.Toolkit;
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileReader;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.StringTokenizer;
-
+import javax.swing.text.StyleContext;
 import com.formdev.flatlaf.util.LoggingFacade;
 import com.formdev.flatlaf.util.StringUtils;
 import com.formdev.flatlaf.util.SystemInfo;
@@ -55,24 +59,38 @@ class LinuxFontPolicy
 
 		String family = "";
 		int style = Font.PLAIN;
-		int size = 10;
+		double dsize = 10;
 
+		// parse pango font description
+		// see https://developer.gnome.org/pango/1.46/pango-Fonts.html#pango-font-description-from-string
 		StringTokenizer st = new StringTokenizer( (String) fontName );
 		while( st.hasMoreTokens() ) {
 			String word = st.nextToken();
 
-			if( word.equalsIgnoreCase( "italic" ) )
+			// remove trailing ',' (e.g. in "Ubuntu Condensed, 11" or "Ubuntu Condensed, Bold 11")
+			if( word.endsWith( "," ) )
+				word = word.substring( 0, word.length() - 1 ).trim();
+
+			String lword = word.toLowerCase( Locale.ENGLISH );
+			if( lword.equals( "italic" ) || lword.equals( "oblique" ) )
 				style |= Font.ITALIC;
-			else if( word.equalsIgnoreCase( "bold" ) )
+			else if( lword.equals( "bold" ) )
 				style |= Font.BOLD;
 			else if( Character.isDigit( word.charAt( 0 ) ) ) {
 				try {
-					size = Integer.parseInt( word );
+					dsize = Double.parseDouble( word );
 				} catch( NumberFormatException ex ) {
 					// ignore
 				}
-			} else
+			} else {
+				// remove '-' from "Semi-Bold", "Extra-Light", etc
+				if( lword.startsWith( "semi-" ) || lword.startsWith( "demi-" ) )
+					word = word.substring( 0, 4 ) + word.substring( 5 );
+				else if( lword.startsWith( "extra-" ) || lword.startsWith( "ultra-" ) )
+					word = word.substring( 0, 5 ) + word.substring( 6 );
+
 				family = family.isEmpty() ? word : (family + ' ' + word);
+			}
 		}
 
 		// Ubuntu font is rendered poorly (except if running in JetBrains VM)
@@ -83,26 +101,58 @@ class LinuxFontPolicy
 		  family = "Liberation Sans";
 
 		// scale font size
-		double dsize = size * getGnomeFontScale();
-		size = (int) (dsize + 0.5);
+		dsize *= getGnomeFontScale();
+		int size = (int) (dsize + 0.5);
 		if( size < 1 )
 			size = 1;
 
 		// handle logical font names
-		String logicalFamily = mapFcName( family.toLowerCase() );
+		String logicalFamily = mapFcName( family.toLowerCase( Locale.ENGLISH ) );
 		if( logicalFamily != null )
 			family = logicalFamily;
 
-		return createFont( family, style, size, dsize );
+		return createFontEx( family, style, size );
 	}
 
-	private static Font createFont( String family, int style, int size, double dsize ) {
-		Font font = FlatLaf.createCompositeFont( family, style, size );
+	/**
+	 * Create a font for the given family, style and size.
+	 * If the font family does not match any font on the system,
+	 * then the last word (usually a font weight) from the family name is removed and tried again.
+	 * E.g. family 'URW Bookman Light' is not found, but 'URW Bookman' is found.
+	 * If still not found, then font of family 'Dialog' is returned.
+	 */
+	private static Font createFontEx( String family, int style, int size ) {
+		for(;;) {
+			Font font = FlatLaf.createCompositeFont( family, style, size );
 
-		// set font size in floating points
-		font = font.deriveFont( style, (float) dsize );
+			if( Font.DIALOG.equals( family ) )
+				return font;
 
-		return font;
+			// if the font family does not match any font on the system, "Dialog" family is returned
+			if( !Font.DIALOG.equals( font.getFamily() ) ) {
+				// check for font problems
+				// - font height much larger than expected (e.g. font Inter; Oracle Java 8)
+				// - character width is zero (e.g. font Cantarell; Fedora; Oracle Java 8)
+				FontMetrics fm = StyleContext.getDefaultStyleContext().getFontMetrics( font );
+				if( fm.getHeight() > size * 2 || fm.stringWidth( "a" ) == 0 )
+					return FlatLaf.createCompositeFont( Font.DIALOG, style, size );
+
+				return font;
+			}
+
+			// find last word in family
+			int index = family.lastIndexOf( ' ' );
+			if( index < 0 )
+				return FlatLaf.createCompositeFont( Font.DIALOG, style, size );
+
+			// check whether last work contains some font weight (e.g. Ultra-Bold or Heavy)
+			String lastWord = family.substring( index + 1 ).toLowerCase( Locale.ENGLISH );
+			if( lastWord.contains( "bold" ) || lastWord.contains( "heavy" ) || lastWord.contains( "black" ) )
+				style |= Font.BOLD;
+
+			// remove last word from family and try again
+			family = family.substring( 0, index );
+		}
 	}
 
 	private static double getGnomeFontScale() {
@@ -114,7 +164,7 @@ class LinuxFontPolicy
 
 		Object value = Toolkit.getDefaultToolkit().getDesktopProperty( "gnome.Xft/DPI" );
 		if( value instanceof Integer ) {
-			int dpi = ((Integer)value).intValue() / 1024;
+			int dpi = (Integer) value / 1024;
 			if( dpi == -1 )
 				dpi = 96;
 			if( dpi < 50 )
@@ -141,10 +191,10 @@ class LinuxFontPolicy
 	}
 
 	/**
-	 * Gets the default font for KDE for KDE configuration files.
+	 * Gets the default font for KDE from KDE configuration files.
 	 *
 	 * The Swing fonts are not updated when the user changes system font size
-	 * (System Settings > Fonts > Force Font DPI). A application restart is necessary.
+	 * (System Settings > Fonts > Force Font DPI). An application restart is necessary.
 	 * This is the same behavior as in native KDE applications.
 	 *
 	 * The "display scale factor" (kdeglobals: [KScreen] > ScaleFactor) is not used
@@ -198,9 +248,10 @@ class LinuxFontPolicy
 		if( size < 1 )
 			size = 1;
 
-		return createFont( family, style, size, dsize );
+		return FlatLaf.createCompositeFont( family, style, size );
 	}
 
+	@SuppressWarnings( "MixedMutabilityReturnType" ) // Error Prone
 	private static List<String> readConfig( String filename ) {
 		File userHome = new File( System.getProperty( "user.home" ) );
 
@@ -221,8 +272,10 @@ class LinuxFontPolicy
 
 		// read config file
 		ArrayList<String> lines = new ArrayList<>( 200 );
-		try( BufferedReader reader = new BufferedReader( new FileReader( file ) ) ) {
-			String line = null;
+		try( BufferedReader reader = new BufferedReader( new InputStreamReader(
+			new FileInputStream( file ), StandardCharsets.US_ASCII ) ) )
+		{
+			String line;
 			while( (line = reader.readLine()) != null )
 				lines.add( line );
 		} catch( IOException ex ) {
@@ -265,6 +318,9 @@ class LinuxFontPolicy
 	 *   - running on JetBrains Runtime 11 or later and scaling is enabled in system Settings
 	 */
 	private static boolean isSystemScaling() {
+		if( GraphicsEnvironment.isHeadless() )
+			return true;
+
 		GraphicsConfiguration gc = GraphicsEnvironment.getLocalGraphicsEnvironment()
 			.getDefaultScreenDevice().getDefaultConfiguration();
 		return UIScale.getSystemScaleFactor( gc ) > 1;

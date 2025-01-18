@@ -22,34 +22,34 @@ import java.awt.Component;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Insets;
-import java.awt.KeyboardFocusManager;
 import java.awt.Paint;
+import java.util.Map;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
-import javax.swing.JTable;
-import javax.swing.JTextField;
-import javax.swing.JTree;
-import javax.swing.JViewport;
-import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.plaf.basic.BasicBorders;
 import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.ui.FlatStylingSupport.Styleable;
+import com.formdev.flatlaf.ui.FlatStylingSupport.StyleableBorder;
 import com.formdev.flatlaf.util.DerivedColor;
 
 /**
  * Border for various components (e.g. {@link javax.swing.JTextField}).
- *
+ * <p>
  * There is empty space around the component border, if Component.focusWidth is greater than zero,
  * which is used to paint outer focus border.
- *
+ * <p>
  * Because there is empty space (if outer focus border is not painted),
  * UI delegates that use this border (or subclasses) must invoke
- * {@link FlatUIUtils#paintParentBackground} to paint the empty space correctly.
+ * {@link FlatUIUtils#paintParentBackground} to fill the empty space correctly.
  *
  * @uiDefault Component.focusWidth						int
  * @uiDefault Component.innerFocusWidth					int or float
+ * @uiDefault Component.innerOutlineWidth				int or float
+ * @uiDefault Component.borderWidth						int or float
+ *
  * @uiDefault Component.focusColor						Color
  * @uiDefault Component.borderColor						Color
  * @uiDefault Component.disabledBorderColor				Color
@@ -65,20 +65,46 @@ import com.formdev.flatlaf.util.DerivedColor;
  */
 public class FlatBorder
 	extends BasicBorders.MarginBorder
+	implements StyleableBorder
 {
-	protected final int focusWidth = UIManager.getInt( "Component.focusWidth" );
-	protected final float innerFocusWidth = FlatUIUtils.getUIFloat( "Component.innerFocusWidth", 0 );
-	protected final float innerOutlineWidth = FlatUIUtils.getUIFloat( "Component.innerOutlineWidth", 0 );
-	protected final Color focusColor = UIManager.getColor( "Component.focusColor" );
-	protected final Color borderColor = UIManager.getColor( "Component.borderColor" );
-	protected final Color disabledBorderColor = UIManager.getColor( "Component.disabledBorderColor" );
-	protected final Color focusedBorderColor = UIManager.getColor( "Component.focusedBorderColor" );
+	@Styleable protected int focusWidth = UIManager.getInt( "Component.focusWidth" );
+	@Styleable protected float innerFocusWidth = FlatUIUtils.getUIFloat( "Component.innerFocusWidth", 0 );
+	@Styleable protected float innerOutlineWidth = FlatUIUtils.getUIFloat( "Component.innerOutlineWidth", 0 );
+	/** @since 2 */ @Styleable protected float borderWidth = FlatUIUtils.getUIFloat( "Component.borderWidth", 1 );
 
-	protected final Color errorBorderColor = UIManager.getColor( "Component.error.borderColor" );
-	protected final Color errorFocusedBorderColor = UIManager.getColor( "Component.error.focusedBorderColor" );
-	protected final Color warningBorderColor = UIManager.getColor( "Component.warning.borderColor" );
-	protected final Color warningFocusedBorderColor = UIManager.getColor( "Component.warning.focusedBorderColor" );
-	protected final Color customBorderColor = UIManager.getColor( "Component.custom.borderColor" );
+	@Styleable protected Color focusColor = UIManager.getColor( "Component.focusColor" );
+	@Styleable protected Color borderColor = UIManager.getColor( "Component.borderColor" );
+	@Styleable protected Color disabledBorderColor = UIManager.getColor( "Component.disabledBorderColor" );
+	@Styleable protected Color focusedBorderColor = UIManager.getColor( "Component.focusedBorderColor" );
+
+	@Styleable(dot=true) protected Color errorBorderColor = UIManager.getColor( "Component.error.borderColor" );
+	@Styleable(dot=true) protected Color errorFocusedBorderColor = UIManager.getColor( "Component.error.focusedBorderColor" );
+	@Styleable(dot=true) protected Color warningBorderColor = UIManager.getColor( "Component.warning.borderColor" );
+	@Styleable(dot=true) protected Color warningFocusedBorderColor = UIManager.getColor( "Component.warning.focusedBorderColor" );
+	@Styleable(dot=true) protected Color customBorderColor = UIManager.getColor( "Component.custom.borderColor" );
+
+	// only used via styling (not in UI defaults, but has likewise client properties)
+	/** @since 2 */ @Styleable protected String outline;
+	/** @since 2 */ @Styleable protected Color outlineColor;
+	/** @since 2 */ @Styleable protected Color outlineFocusedColor;
+
+	/** @since 2 */
+	@Override
+	public Object applyStyleProperty( String key, Object value ) {
+		return FlatStylingSupport.applyToAnnotatedObject( this, key, value );
+	}
+
+	/** @since 2 */
+	@Override
+	public Map<String, Class<?>> getStyleableInfos() {
+		return FlatStylingSupport.getAnnotatedStyleableInfos( this );
+	}
+
+	/** @since 2.5 */
+	@Override
+	public Object getStyleableValue( String key ) {
+		return FlatStylingSupport.getAnnotatedStyleableValue( this, key );
+	}
 
 	@Override
 	public void paintBorder( Component c, Graphics g, int x, int y, int width, int height ) {
@@ -87,9 +113,11 @@ public class FlatBorder
 			FlatUIUtils.setRenderingHints( g2 );
 
 			float focusWidth = scale( (float) getFocusWidth( c ) );
-			float borderWidth = scale( (float) getBorderWidth( c ) );
+			float focusInnerWidth = 0;
+			float borderWidth = scale( getBorderWidth( c ) );
 			float arc = scale( (float) getArc( c ) );
 			Color outlineColor = getOutlineColor( c );
+			Color focusColor = null;
 
 			// paint outer border
 			if( outlineColor != null || isFocused( c ) ) {
@@ -98,15 +126,16 @@ public class FlatBorder
 					: 0;
 
 				if( focusWidth > 0 || innerWidth > 0 ) {
-					g2.setColor( (outlineColor != null) ? outlineColor : getFocusColor( c ) );
-					FlatUIUtils.paintComponentOuterBorder( g2, x, y, width, height,
-						focusWidth, borderWidth + scale( innerWidth ), arc );
+					focusColor = (outlineColor != null) ? outlineColor : getFocusColor( c );
+					focusInnerWidth = borderWidth + scale( innerWidth );
 				}
 			}
 
 			// paint border
-			g2.setPaint( (outlineColor != null) ? outlineColor : getBorderColor( c ) );
-			FlatUIUtils.paintComponentBorder( g2, x, y, width, height, focusWidth, borderWidth, arc );
+			Paint borderColor = (outlineColor != null) ? outlineColor : getBorderColor( c );
+			FlatUIUtils.paintOutlinedComponent( g2, x, y, width, height,
+				focusWidth, 1, focusInnerWidth, borderWidth, arc,
+				focusColor, borderColor, null, c instanceof JScrollPane );
 		} finally {
 			g2.dispose();
 		}
@@ -121,6 +150,17 @@ public class FlatBorder
 			return null;
 
 		Object outline = ((JComponent)c).getClientProperty( FlatClientProperties.OUTLINE );
+		if( outline == null )
+			outline = this.outline;
+		if( outline == null ) {
+			if( outlineColor != null && outlineFocusedColor != null )
+				outline = new Color[] { outlineFocusedColor, outlineColor };
+			else if( outlineColor != null )
+				outline = outlineColor;
+			else if( outlineFocusedColor != null )
+				outline = outlineFocusedColor;
+		}
+
 		if( outline instanceof String ) {
 			switch( (String) outline ) {
 				case FlatClientProperties.OUTLINE_ERROR:
@@ -154,8 +194,7 @@ public class FlatBorder
 	protected boolean isEnabled( Component c ) {
 		if( c instanceof JScrollPane ) {
 			// check whether view component is disabled
-			JViewport viewport = ((JScrollPane)c).getViewport();
-			Component view = (viewport != null) ? viewport.getView() : null;
+			Component view = FlatScrollPaneUI.getView( (JScrollPane) c );
 			if( view != null && !isEnabled( view ) )
 				return false;
 		}
@@ -164,37 +203,13 @@ public class FlatBorder
 	}
 
 	protected boolean isFocused( Component c ) {
-		if( c instanceof JScrollPane ) {
-			JViewport viewport = ((JScrollPane)c).getViewport();
-			Component view = (viewport != null) ? viewport.getView() : null;
-			if( view != null ) {
-				if( FlatUIUtils.isPermanentFocusOwner( view ) )
-					return true;
-
-				if( (view instanceof JTable && ((JTable)view).isEditing()) ||
-					(view instanceof JTree && ((JTree)view).isEditing()) )
-				{
-					Component focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
-					if( focusOwner != null )
-						return SwingUtilities.isDescendingFrom( focusOwner, view );
-				}
-			}
-			return false;
-		} else if( c instanceof JComboBox && ((JComboBox<?>)c).isEditable() ) {
-			Component editorComponent = ((JComboBox<?>)c).getEditor().getEditorComponent();
-			return (editorComponent != null) ? FlatUIUtils.isPermanentFocusOwner( editorComponent ) : false;
-		} else if( c instanceof JSpinner ) {
-			if( FlatUIUtils.isPermanentFocusOwner( c ) )
-				return true;
-
-			JComponent editor = ((JSpinner)c).getEditor();
-			if( editor instanceof JSpinner.DefaultEditor ) {
-				JTextField textField = ((JSpinner.DefaultEditor)editor).getTextField();
-				if( textField != null )
-					return FlatUIUtils.isPermanentFocusOwner( textField );
-			}
-			return false;
-		} else
+		if( c instanceof JScrollPane )
+			return FlatScrollPaneUI.isPermanentFocusOwner( (JScrollPane) c );
+		else if( c instanceof JComboBox )
+			return FlatComboBoxUI.isPermanentFocusOwner( (JComboBox<?>) c );
+		else if( c instanceof JSpinner )
+			return FlatSpinnerUI.isPermanentFocusOwner( (JSpinner) c );
+		else
 			return FlatUIUtils.isPermanentFocusOwner( c );
 	}
 
@@ -205,13 +220,14 @@ public class FlatBorder
 	@Override
 	public Insets getBorderInsets( Component c, Insets insets ) {
 		float focusWidth = scale( (float) getFocusWidth( c ) );
-		float ow = focusWidth + scale( (float) getLineWidth( c ) );
+		int ow = Math.round( focusWidth + scale( (float) getLineWidth( c ) ) );
 
 		insets = super.getBorderInsets( c, insets );
-		insets.top = Math.round( scale( (float) insets.top ) + ow );
-		insets.left = Math.round( scale( (float) insets.left ) + ow );
-		insets.bottom = Math.round( scale( (float) insets.bottom ) + ow );
-		insets.right = Math.round( scale( (float) insets.right ) + ow );
+
+		insets.top = scale( insets.top ) + ow;
+		insets.left = scale( insets.left ) + ow;
+		insets.bottom = scale( insets.bottom ) + ow;
+		insets.right = scale( insets.right ) + ow;
 
 		if( isCellEditor( c ) ) {
 			// remove top and bottom insets if used as cell editor
@@ -256,12 +272,12 @@ public class FlatBorder
 	 * Returns the (unscaled) line thickness used to paint the border.
 	 * This may be different to {@link #getLineWidth}.
 	 */
-	protected int getBorderWidth( Component c ) {
-		return getLineWidth( c );
+	protected float getBorderWidth( Component c ) {
+		return borderWidth;
 	}
 
 	/**
-	 * Returns the (unscaled) arc diameter of the border.
+	 * Returns the (unscaled) arc diameter of the border corners.
 	 */
 	protected int getArc( Component c ) {
 		return 0;

@@ -18,7 +18,7 @@ package com.formdev.flatlaf.extras.components;
 
 import static com.formdev.flatlaf.FlatClientProperties.*;
 import java.awt.Color;
-import javax.swing.JToggleButton;
+import javax.swing.*;
 import com.formdev.flatlaf.extras.components.FlatButton.ButtonType;
 
 /**
@@ -28,17 +28,17 @@ import com.formdev.flatlaf.extras.components.FlatButton.ButtonType;
  */
 public class FlatToggleButton
 	extends JToggleButton
-	implements FlatComponentExtension
+	implements FlatComponentExtension, FlatStyleableComponent
 {
 	/**
-	 * Returns type of a button.
+	 * Returns type of button.
 	 */
 	public ButtonType getButtonType() {
 		return getClientPropertyEnumString( BUTTON_TYPE, ButtonType.class, null, ButtonType.none );
 	}
 
 	/**
-	 * Specifies type of a button.
+	 * Specifies type of button.
 	 */
 	public void setButtonType( ButtonType buttonType ) {
 		if( buttonType == ButtonType.none )
@@ -116,16 +116,37 @@ public class FlatToggleButton
 		putClientProperty( OUTLINE, outline );
 	}
 
+	/**
+	 * Returns placement of underline if toggle button type is {@link ButtonType#tab}.
+	 * If underline placement is not specified, returns {@link #BOTTOM} as the default
+	 * value.
+	 *
+	 * @since 2.3
+	 */
+	public int getTabUnderlinePlacement() {
+		return getClientPropertyInt( TAB_BUTTON_UNDERLINE_PLACEMENT, BOTTOM );
+	}
 
 	/**
-	 * Returns height of underline if toggle button type is {@link ButtonType#tab}.
+	 * Specifies placement of underline if toggle button type is {@link ButtonType#tab}.
+	 *
+	 * @param placement  One of the following constants defined in SwingConstants:
+	 *                   {@link #TOP}, {@link #LEFT}, {@link #BOTTOM}, or {@link #RIGHT}.
+	 * @since 2.3
+	 */
+	public void setTabUnderlinePlacement( int placement ) {
+		putClientProperty( TAB_BUTTON_UNDERLINE_PLACEMENT, (placement >= 0) ? placement : null );
+	}
+
+	/**
+	 * Returns thickness of underline if toggle button type is {@link ButtonType#tab}.
 	 */
 	public int getTabUnderlineHeight() {
 		return getClientPropertyInt( TAB_BUTTON_UNDERLINE_HEIGHT, "ToggleButton.tab.underlineHeight" );
 	}
 
 	/**
-	 * Specifies height of underline if toggle button type is {@link ButtonType#tab}.
+	 * Specifies thickness of underline if toggle button type is {@link ButtonType#tab}.
 	 */
 	public void setTabUnderlineHeight( int tabUnderlineHeight ) {
 		putClientProperty( TAB_BUTTON_UNDERLINE_HEIGHT, (tabUnderlineHeight >= 0) ? tabUnderlineHeight : null );

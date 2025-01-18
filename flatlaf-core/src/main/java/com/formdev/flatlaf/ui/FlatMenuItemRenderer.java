@@ -19,26 +19,37 @@ package com.formdev.flatlaf.ui;
 import static com.formdev.flatlaf.util.UIScale.scale;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GridLayout;
 import java.awt.Insets;
+import java.awt.LayoutManager;
 import java.awt.Paint;
 import java.awt.Rectangle;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.text.AttributedCharacterIterator;
+import java.util.Map;
 import javax.swing.Icon;
+import javax.swing.JComponent;
 import javax.swing.JMenu;
+import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.plaf.basic.BasicHTML;
 import javax.swing.text.View;
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.icons.FlatCheckBoxMenuItemIcon;
+import com.formdev.flatlaf.icons.FlatMenuArrowIcon;
+import com.formdev.flatlaf.ui.FlatStylingSupport.Styleable;
+import com.formdev.flatlaf.ui.FlatStylingSupport.UnknownStyleException;
 import com.formdev.flatlaf.util.DerivedColor;
 import com.formdev.flatlaf.util.Graphics2DProxy;
 import com.formdev.flatlaf.util.HiDPIUtils;
@@ -47,43 +58,54 @@ import com.formdev.flatlaf.util.SystemInfo;
 /**
  * Renderer for menu items.
  *
+ * @uiDefault MenuItem.verticallyAlignText							boolean
  * @uiDefault MenuItem.minimumWidth									int
  * @uiDefault MenuItem.minimumIconSize								Dimension
  * @uiDefault MenuItem.textAcceleratorGap							int
  * @uiDefault MenuItem.textNoAcceleratorGap							int
  * @uiDefault MenuItem.acceleratorArrowGap							int
  * @uiDefault MenuItem.checkBackground								Color
+ * @uiDefault MenuItem.checkMargins									Insets
+ * @uiDefault MenuItem.selectionInsets								Insets
+ * @uiDefault MenuItem.selectionArc									int
+ * @uiDefault MenuItem.selectionType								String	null (default) or underline
  * @uiDefault MenuItem.underlineSelectionBackground					Color
  * @uiDefault MenuItem.underlineSelectionCheckBackground			Color
  * @uiDefault MenuItem.underlineSelectionColor						Color
  * @uiDefault MenuItem.underlineSelectionHeight						int
- * @uiDefault MenuItem.selectionBackground							Color
  *
  * @author Karl Tauber
  */
 public class FlatMenuItemRenderer
 {
+	private static final String KEY_MAX_ICONS_WIDTH = "FlatLaf.internal.FlatMenuItemRenderer.maxIconWidth";
+
 	protected final JMenuItem menuItem;
-	protected final Icon checkIcon;
-	protected final Icon arrowIcon;
-	protected final Font acceleratorFont;
+	protected Icon checkIcon;
+	protected Icon arrowIcon;
+	@Styleable protected Font acceleratorFont;
 	protected final String acceleratorDelimiter;
 
-	protected final int minimumWidth = UIManager.getInt( "MenuItem.minimumWidth" );
-	protected final Dimension minimumIconSize;
-	protected final int textAcceleratorGap = FlatUIUtils.getUIInt( "MenuItem.textAcceleratorGap", 28 );
-	protected final int textNoAcceleratorGap = FlatUIUtils.getUIInt( "MenuItem.textNoAcceleratorGap", 6 );
-	protected final int acceleratorArrowGap = FlatUIUtils.getUIInt( "MenuItem.acceleratorArrowGap", 2 );
+	/** @since 2 */ @Styleable protected boolean verticallyAlignText = FlatUIUtils.getUIBoolean( "MenuItem.verticallyAlignText", true );
+	@Styleable protected int minimumWidth = UIManager.getInt( "MenuItem.minimumWidth" );
+	@Styleable protected Dimension minimumIconSize;
+	@Styleable protected int textAcceleratorGap = FlatUIUtils.getUIInt( "MenuItem.textAcceleratorGap", 28 );
+	@Styleable protected int textNoAcceleratorGap = FlatUIUtils.getUIInt( "MenuItem.textNoAcceleratorGap", 6 );
+	@Styleable protected int acceleratorArrowGap = FlatUIUtils.getUIInt( "MenuItem.acceleratorArrowGap", 2 );
 
-	protected final Color checkBackground = UIManager.getColor( "MenuItem.checkBackground" );
-	protected final Insets checkMargins = UIManager.getInsets( "MenuItem.checkMargins" );
+	@Styleable protected Color checkBackground = UIManager.getColor( "MenuItem.checkBackground" );
+	@Styleable protected Insets checkMargins = UIManager.getInsets( "MenuItem.checkMargins" );
 
-	protected final Color underlineSelectionBackground = UIManager.getColor( "MenuItem.underlineSelectionBackground" );
-	protected final Color underlineSelectionCheckBackground = UIManager.getColor( "MenuItem.underlineSelectionCheckBackground" );
-	protected final Color underlineSelectionColor = UIManager.getColor( "MenuItem.underlineSelectionColor" );
-	protected final int underlineSelectionHeight = UIManager.getInt( "MenuItem.underlineSelectionHeight" );
+	/** @since 3 */ @Styleable protected Insets selectionInsets = UIManager.getInsets( "MenuItem.selectionInsets" );
+	/** @since 3 */ @Styleable protected int selectionArc = UIManager.getInt( "MenuItem.selectionArc" );
 
-	protected final Color selectionBackground = UIManager.getColor( "MenuItem.selectionBackground" );
+	@Styleable protected Color underlineSelectionBackground = UIManager.getColor( "MenuItem.underlineSelectionBackground" );
+	@Styleable protected Color underlineSelectionCheckBackground = UIManager.getColor( "MenuItem.underlineSelectionCheckBackground" );
+	@Styleable protected Color underlineSelectionColor = UIManager.getColor( "MenuItem.underlineSelectionColor" );
+	@Styleable protected int underlineSelectionHeight = UIManager.getInt( "MenuItem.underlineSelectionHeight" );
+
+	private boolean iconsShared = true;
+	private final Font menuFont = UIManager.getFont( "Menu.font" );
 
 	protected FlatMenuItemRenderer( JMenuItem menuItem, Icon checkIcon, Icon arrowIcon,
 		Font acceleratorFont, String acceleratorDelimiter )
@@ -98,6 +120,77 @@ public class FlatMenuItemRenderer
 		this.minimumIconSize = (minimumIconSize != null) ? minimumIconSize : new Dimension( 16, 16 );
 	}
 
+	/** @since 2 */
+	protected Object applyStyleProperty( String key, Object value ) {
+		// style icon
+		if( key.startsWith( "icon." ) || key.equals( "selectionForeground" ) ) {
+			if( iconsShared ) {
+				if( checkIcon instanceof FlatCheckBoxMenuItemIcon )
+					checkIcon = FlatStylingSupport.cloneIcon( checkIcon );
+				if( arrowIcon instanceof FlatMenuArrowIcon )
+					arrowIcon = FlatStylingSupport.cloneIcon( arrowIcon );
+				iconsShared = false;
+			}
+
+			if( key.startsWith( "icon." ) ) {
+				String key2 = key.substring( "icon.".length() );
+
+				try {
+					if( checkIcon instanceof FlatCheckBoxMenuItemIcon )
+						return ((FlatCheckBoxMenuItemIcon)checkIcon).applyStyleProperty( key2, value );
+				} catch ( UnknownStyleException ex ) {
+					// ignore
+				}
+
+				try {
+					if( arrowIcon instanceof FlatMenuArrowIcon )
+						return ((FlatMenuArrowIcon)arrowIcon).applyStyleProperty( key2, value );
+				} catch ( UnknownStyleException ex ) {
+					// ignore
+				}
+
+				// keys with prefix "icon." are only for icons
+				throw new UnknownStyleException( key );
+			} else if( key.equals( "selectionForeground" ) ) {
+				// special case: same key is used in icons and in menuitem
+				if( checkIcon instanceof FlatCheckBoxMenuItemIcon )
+					((FlatCheckBoxMenuItemIcon)checkIcon).applyStyleProperty( key, value );
+				if( arrowIcon instanceof FlatMenuArrowIcon )
+					((FlatMenuArrowIcon)arrowIcon).applyStyleProperty( key, value );
+
+				// throw exception because the caller should also apply this key
+				throw new UnknownStyleException( key );
+			}
+		}
+
+		return FlatStylingSupport.applyToAnnotatedObject( this, key, value );
+	}
+
+	/** @since 2 */
+	public Map<String, Class<?>> getStyleableInfos() {
+		Map<String, Class<?>> infos = FlatStylingSupport.getAnnotatedStyleableInfos( this );
+		if( checkIcon instanceof FlatCheckBoxMenuItemIcon )
+			FlatStylingSupport.putAllPrefixKey( infos, "icon.", ((FlatCheckBoxMenuItemIcon)checkIcon).getStyleableInfos() );
+		infos.remove( "icon.selectionForeground" );
+		if( arrowIcon instanceof FlatMenuArrowIcon )
+			FlatStylingSupport.putAllPrefixKey( infos, "icon.", ((FlatMenuArrowIcon)arrowIcon).getStyleableInfos() );
+		infos.remove( "icon.selectionForeground" );
+		return infos;
+	}
+
+	/** @since 2.5 */
+	public Object getStyleableValue( String key ) {
+		if( key.startsWith( "icon." ) ) {
+			String key2 = key.substring( "icon.".length() );
+			if( checkIcon instanceof FlatCheckBoxMenuItemIcon )
+				return ((FlatCheckBoxMenuItemIcon)checkIcon).getStyleableValue( key2 );
+			if( arrowIcon instanceof FlatMenuArrowIcon )
+				return ((FlatMenuArrowIcon)arrowIcon).getStyleableValue( key2 );
+		}
+
+		return FlatStylingSupport.getAnnotatedStyleableValue( this, key );
+	}
+
 	protected Dimension getPreferredMenuItemSize() {
 		int width = 0;
 		int height = 0;
@@ -109,7 +202,8 @@ public class FlatMenuItemRenderer
 
 		// layout icon and text
 		SwingUtilities.layoutCompoundLabel( menuItem,
-			menuItem.getFontMetrics( menuItem.getFont() ), menuItem.getText(), getIconForLayout(),
+			menuItem.getFontMetrics( isTopLevelMenu ? getTopLevelFont() : menuItem.getFont() ),
+			menuItem.getText(), getIconForLayout(),
 			menuItem.getVerticalAlignment(), menuItem.getHorizontalAlignment(),
 			menuItem.getVerticalTextPosition(), menuItem.getHorizontalTextPosition(),
 			viewRect, iconRect, textRect, scale( menuItem.getIconTextGap() ) );
@@ -131,7 +225,7 @@ public class FlatMenuItemRenderer
 		}
 
 		// arrow size
-		if( !isTopLevelMenu && arrowIcon != null ) {
+		if( arrowIcon != null && (!isTopLevelMenu || isInVerticalMenuBar( menuItem )) ) {
 			// gap between text and arrow
 			if( accelText == null )
 				width += scale( textNoAcceleratorGap );
@@ -163,7 +257,8 @@ public class FlatMenuItemRenderer
 		boolean isTopLevelMenu = isTopLevelMenu( menuItem );
 
 		// layout arrow
-		if( !isTopLevelMenu && arrowIcon != null ) {
+		boolean showArrowIcon = (arrowIcon != null && (!isTopLevelMenu || isInVerticalMenuBar( menuItem )));
+		if( showArrowIcon ) {
 			arrowRect.width = arrowIcon.getIconWidth();
 			arrowRect.height = arrowIcon.getIconHeight();
 		} else
@@ -197,7 +292,7 @@ public class FlatMenuItemRenderer
 		int accelArrowWidth = accelRect.width + arrowRect.width;
 		if( accelText != null )
 			accelArrowWidth += scale( !isTopLevelMenu ? textAcceleratorGap : menuItem.getIconTextGap() );
-		if( !isTopLevelMenu && arrowIcon != null ) {
+		if( showArrowIcon ) {
 			if( accelText == null )
 				accelArrowWidth += scale( textNoAcceleratorGap );
 			accelArrowWidth += scale( acceleratorArrowGap );
@@ -211,7 +306,8 @@ public class FlatMenuItemRenderer
 
 		// layout icon and text
 		SwingUtilities.layoutCompoundLabel( menuItem,
-			menuItem.getFontMetrics( menuItem.getFont() ), menuItem.getText(), getIconForLayout(),
+			menuItem.getFontMetrics( isTopLevelMenu ? getTopLevelFont() : menuItem.getFont() ),
+			menuItem.getText(), getIconForLayout(),
 			menuItem.getVerticalAlignment(), menuItem.getHorizontalAlignment(),
 			menuItem.getVerticalTextPosition(), menuItem.getHorizontalTextPosition(),
 			labelRect, iconRect, textRect, scale( menuItem.getIconTextGap() ) );
@@ -250,32 +346,52 @@ public class FlatMenuItemRenderer
 		g.setColor( Color.orange ); g.drawRect( arrowRect.x, arrowRect.y, arrowRect.width - 1, arrowRect.height - 1 );
 debug*/
 
+		boolean armedOrSelected = isArmedOrSelected( menuItem );
 		boolean underlineSelection = isUnderlineSelection();
-		paintBackground( g, underlineSelection ? underlineSelectionBackground : selectionBackground );
-		if( underlineSelection && isArmedOrSelected( menuItem ) )
-			paintUnderlineSelection( g, underlineSelectionColor, underlineSelectionHeight );
-		paintIcon( g, iconRect, getIconForPainting(), underlineSelection ? underlineSelectionCheckBackground : checkBackground );
+
+		paintBackground( g );
+		if( armedOrSelected ) {
+			if( underlineSelection )
+				paintUnderlineSelection( g, underlineSelectionBackground, underlineSelectionColor, underlineSelectionHeight );
+			else
+				paintSelection( g, selectionBackground, selectionInsets, selectionArc );
+		}
+		paintIcon( g, iconRect, getIconForPainting(), underlineSelection ? underlineSelectionCheckBackground : checkBackground, selectionBackground );
 		paintText( g, textRect, menuItem.getText(), selectionForeground, disabledForeground );
 		paintAccelerator( g, accelRect, getAcceleratorText(), acceleratorForeground, acceleratorSelectionForeground, disabledForeground );
-		if( !isTopLevelMenu( menuItem ) )
+		if( arrowIcon != null && (!isTopLevelMenu( menuItem ) || isInVerticalMenuBar( menuItem )) )
 			paintArrowIcon( g, arrowRect, arrowIcon );
 	}
 
-	protected void paintBackground( Graphics g, Color selectionBackground ) {
-		boolean armedOrSelected = isArmedOrSelected( menuItem );
-		if( menuItem.isOpaque() || armedOrSelected ) {
-			// paint background
-			g.setColor( armedOrSelected
-				? deriveBackground( selectionBackground )
-				: menuItem.getBackground() );
+	/** @since 3 */
+	protected void paintBackground( Graphics g ) {
+		if( menuItem.isOpaque() ) {
+			g.setColor( menuItem.getBackground() );
 			g.fillRect( 0, 0, menuItem.getWidth(), menuItem.getHeight() );
 		}
 	}
 
-	protected void paintUnderlineSelection( Graphics g, Color underlineSelectionColor, int underlineSelectionHeight ) {
+	/** @since 3 */
+	protected void paintSelection( Graphics g, Color selectionBackground, Insets selectionInsets, int selectionArc ) {
+		float arc = scale( selectionArc / 2f );
+
+		g.setColor( deriveBackground( selectionBackground ) );
+		FlatUIUtils.paintSelection( (Graphics2D) g, 0, 0, menuItem.getWidth(), menuItem.getHeight(),
+			scale( selectionInsets ), arc, arc, arc, arc, 0 );
+	}
+
+	/** @since 3 */
+	protected void paintUnderlineSelection( Graphics g, Color underlineSelectionBackground,
+		Color underlineSelectionColor, int underlineSelectionHeight )
+	{
 		int width = menuItem.getWidth();
 		int height = menuItem.getHeight();
 
+		// paint background
+		g.setColor( deriveBackground( underlineSelectionBackground ) );
+		g.fillRect( 0, 0, width, height );
+
+		// paint underline
 		int underlineHeight = scale( underlineSelectionHeight );
 		g.setColor( underlineSelectionColor );
 		if( isTopLevelMenu( menuItem ) ) {
@@ -301,7 +417,7 @@ debug*/
 		return FlatUIUtils.deriveColor( background, baseColor );
 	}
 
-	protected void paintIcon( Graphics g, Rectangle iconRect, Icon icon, Color checkBackground ) {
+	protected void paintIcon( Graphics g, Rectangle iconRect, Icon icon, Color checkBackground, Color selectionBackground ) {
 		// if checkbox/radiobutton menu item is selected and also has a custom icon,
 		// then use filled icon background to indicate selection (instead of using checkIcon)
 		if( menuItem.isSelected() && checkIcon != null && icon != checkIcon ) {
@@ -321,9 +437,10 @@ debug*/
 		}
 
 		int mnemonicIndex = FlatLaf.isShowMnemonics() ? menuItem.getDisplayedMnemonicIndex() : -1;
-		Color foreground = (isTopLevelMenu( menuItem ) ? menuItem.getParent() : menuItem).getForeground();
+		boolean isTopLevelMenu = isTopLevelMenu( menuItem );
+		Color foreground = (isTopLevelMenu ? menuItem.getParent() : menuItem).getForeground();
 
-		paintText( g, menuItem, textRect, text, mnemonicIndex, menuItem.getFont(),
+		paintText( g, menuItem, textRect, text, mnemonicIndex, isTopLevelMenu ? getTopLevelFont() : menuItem.getFont(),
 			foreground, isUnderlineSelection() ? foreground : selectionForeground, disabledForeground );
 	}
 
@@ -376,12 +493,29 @@ debug*/
 	protected static void paintHTMLText( Graphics g, JMenuItem menuItem,
 		Rectangle textRect, View htmlView, Color selectionForeground )
 	{
+		// On Windows, using Segoe UI font, Java 15 or older and scaling greater than 1,
+		// the width of the HTML view may be initially too small (because component
+		// is not connected to a GraphicsConfiguration when getPreferredSize() is invoked).
+		// Since Java 16, this seems to be fixed somehow by doing popup menu layout twice.
+		//
+		// If using a too small width for htmlView.paint(), the view would rearrange
+		// its children and wrap them to two lines. To avoid this, use view preferred X span
+		// for painting. Core Lafs actually do the same in class MenuItemLayoutHelper.
+		//
+		// Example HTML text that causes the problem: "<html>some <b>HTML</b> <i>text</i></html>"
+		textRect = new Rectangle( textRect );
+		textRect.width = (int) htmlView.getPreferredSpan( View.X_AXIS );
+
 		if( isArmedOrSelected( menuItem ) && selectionForeground != null )
 			g = new GraphicsProxyWithTextColor( (Graphics2D) g, selectionForeground );
 
 		htmlView.paint( HiDPIUtils.createGraphicsTextYCorrection( (Graphics2D) g ), textRect );
 	}
 
+	/**
+	 * Returns {@code true} if either the menu item is armed (mouse over item)
+	 * or it is a {@code JMenu} and selected (shows submenu).
+	 */
 	protected static boolean isArmedOrSelected( JMenuItem menuItem ) {
 		return menuItem.isArmed() || (menuItem instanceof JMenu && menuItem.isSelected());
 	}
@@ -390,8 +524,26 @@ debug*/
 		return menuItem instanceof JMenu && ((JMenu)menuItem).isTopLevelMenu();
 	}
 
+	/** @since 3.5 */
+	public static boolean isInVerticalMenuBar( JMenuItem menuItem ) {
+		if( !(menuItem instanceof JMenu) || !(menuItem.getParent() instanceof JMenuBar) )
+			return false;
+
+		LayoutManager layout = menuItem.getParent().getLayout();
+		return layout instanceof GridLayout && ((GridLayout)layout).getRows() != 1;
+	}
+
 	protected boolean isUnderlineSelection() {
 		return "underline".equals( UIManager.getString( "MenuItem.selectionType" ) );
+	}
+
+	private Font getTopLevelFont() {
+		Font font = menuItem.getFont();
+		// menu item parent may be null if JMenu.isTopLevelMenu() is overridden
+		// and does not check parent (e.g. com.jidesoft.swing.JideMenu.isTopLevelMenu())
+		return (font != menuFont || menuItem.getParent() == null)
+			? font
+			: menuItem.getParent().getFont();
 	}
 
 	private Icon getIconForPainting() {
@@ -410,6 +562,12 @@ debug*/
 			Icon pressedIcon = menuItem.getPressedIcon();
 			if( pressedIcon != null )
 				return pressedIcon;
+		}
+
+		if( isArmedOrSelected( menuItem ) ) {
+			Icon selectedIcon = menuItem.getSelectedIcon();
+			if( selectedIcon != null )
+				return selectedIcon;
 		}
 
 		return icon;
@@ -498,6 +656,44 @@ debug*/
 		shiftGlyph = 0x21E7,
 		commandGlyph = 0x2318;
 
+	/**
+	 * Calculates the maximum width of all menu item icons in the popup.
+	 */
+	private int getMaxIconsWidth() {
+		if( !verticallyAlignText )
+			return 0;
+
+		Container parent = menuItem.getParent();
+		if( !(parent instanceof JComponent) )
+			return 0;
+
+		int maxWidth = FlatClientProperties.clientPropertyInt( (JComponent) parent, KEY_MAX_ICONS_WIDTH, -1 );
+		if( maxWidth >= 0 )
+			return maxWidth;
+
+		maxWidth = 0;
+
+		for( Component c : parent.getComponents() ) {
+			if( !(c instanceof JMenuItem) )
+				continue;
+
+			Icon icon = ((JMenuItem)c).getIcon();
+			if( icon != null )
+				maxWidth = Math.max( maxWidth, icon.getIconWidth() );
+		}
+
+		((JComponent)parent).putClientProperty( KEY_MAX_ICONS_WIDTH, maxWidth );
+		return maxWidth;
+	}
+
+	static void clearClientProperties( Component c ) {
+		if( !(c instanceof JComponent) )
+			return;
+
+		JComponent jc = (JComponent) c;
+		jc.putClientProperty( FlatMenuItemRenderer.KEY_MAX_ICONS_WIDTH, null );
+	}
+
 	//---- class MinSizeIcon --------------------------------------------------
 
 	private class MinSizeIcon
@@ -512,6 +708,7 @@ debug*/
 		@Override
 		public int getIconWidth() {
 			int iconWidth = (delegate != null) ? delegate.getIconWidth() : 0;
+			iconWidth = Math.max( iconWidth, getMaxIconsWidth() );
 			return Math.max( iconWidth, scale( minimumIconSize.width ) );
 		}
 

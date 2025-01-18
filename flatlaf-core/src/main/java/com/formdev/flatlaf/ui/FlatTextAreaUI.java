@@ -20,15 +20,20 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Insets;
+import java.awt.event.FocusListener;
 import java.beans.PropertyChangeEvent;
+import java.util.Map;
 import javax.swing.JComponent;
 import javax.swing.JTextArea;
 import javax.swing.UIManager;
 import javax.swing.plaf.ComponentUI;
-import javax.swing.plaf.UIResource;
 import javax.swing.plaf.basic.BasicTextAreaUI;
-import javax.swing.text.JTextComponent;
+import javax.swing.text.Caret;
+import com.formdev.flatlaf.ui.FlatStylingSupport.Styleable;
+import com.formdev.flatlaf.ui.FlatStylingSupport.StyleableUI;
 import com.formdev.flatlaf.util.HiDPIUtils;
+import com.formdev.flatlaf.util.LoggingFacade;
 
 /**
  * Provides the Flat LaF UI delegate for {@link javax.swing.JTextArea}.
@@ -49,20 +54,29 @@ import com.formdev.flatlaf.util.HiDPIUtils;
  * <!-- FlatTextAreaUI -->
  *
  * @uiDefault Component.minimumWidth			int
- * @uiDefault Component.isIntelliJTheme			boolean
  * @uiDefault TextArea.disabledBackground		Color	used if not enabled
  * @uiDefault TextArea.inactiveBackground		Color	used if not editable
+ * @uiDefault TextArea.focusedBackground		Color	optional
  *
  * @author Karl Tauber
  */
 public class FlatTextAreaUI
 	extends BasicTextAreaUI
+	implements StyleableUI
 {
-	protected int minimumWidth;
-	protected boolean isIntelliJTheme;
-	protected Color background;
-	protected Color disabledBackground;
-	protected Color inactiveBackground;
+	@Styleable protected int minimumWidth;
+	private Color background;
+	@Styleable protected Color disabledBackground;
+	@Styleable protected Color inactiveBackground;
+	@Styleable protected Color focusedBackground;
+
+	private Color oldDisabledBackground;
+	private Color oldInactiveBackground;
+
+	private Insets defaultMargin;
+
+	private FocusListener focusListener;
+	private Map<String, Object> oldStyleValues;
 
 	public static ComponentUI createUI( JComponent c ) {
 		return new FlatTextAreaUI();
@@ -70,9 +84,16 @@ public class FlatTextAreaUI
 
 	@Override
 	public void installUI( JComponent c ) {
+		if( FlatUIUtils.needsLightAWTPeer( c ) )
+			FlatUIUtils.runWithLightAWTPeerUIDefaults( () -> installUIImpl( c ) );
+		else
+			installUIImpl( c );
+	}
+
+	private void installUIImpl( JComponent c ) {
 		super.installUI( c );
 
-		updateBackground();
+		installStyle();
 	}
 
 	@Override
@@ -80,10 +101,12 @@ public class FlatTextAreaUI
 		super.installDefaults();
 
 		minimumWidth = UIManager.getInt( "Component.minimumWidth" );
-		isIntelliJTheme = UIManager.getBoolean( "Component.isIntelliJTheme" );
 		background = UIManager.getColor( "TextArea.background" );
 		disabledBackground = UIManager.getColor( "TextArea.disabledBackground" );
 		inactiveBackground = UIManager.getColor( "TextArea.inactiveBackground" );
+		focusedBackground = UIManager.getColor( "TextArea.focusedBackground" );
+
+		defaultMargin = UIManager.getInsets( "TextArea.margin" );
 	}
 
 	@Override
@@ -93,42 +116,87 @@ public class FlatTextAreaUI
 		background = null;
 		disabledBackground = null;
 		inactiveBackground = null;
+		focusedBackground = null;
+
+		oldDisabledBackground = null;
+		oldInactiveBackground = null;
+
+		oldStyleValues = null;
+	}
+
+	@Override
+	protected void installListeners() {
+		super.installListeners();
+
+		// necessary to update focus background
+		focusListener = new FlatUIUtils.RepaintFocusListener( getComponent(), c -> focusedBackground != null );
+		getComponent().addFocusListener( focusListener );
+	}
+
+	@Override
+	protected void uninstallListeners() {
+		super.uninstallListeners();
+
+		getComponent().removeFocusListener( focusListener );
+		focusListener = null;
+	}
+
+	@Override
+	protected Caret createCaret() {
+		return new FlatCaret( null, false );
 	}
 
 	@Override
 	protected void propertyChange( PropertyChangeEvent e ) {
-		super.propertyChange( e );
-		FlatEditorPaneUI.propertyChange( getComponent(), e );
+		// invoke updateBackground() before super.propertyChange()
+		String propertyName = e.getPropertyName();
+		if( "editable".equals( propertyName ) || "enabled".equals( propertyName ) )
+			updateBackground();
 
-		switch( e.getPropertyName() ) {
-			case "editable":
-			case "enabled":
-				updateBackground();
-				break;
+		super.propertyChange( e );
+		FlatEditorPaneUI.propertyChange( getComponent(), e, this::installStyle );
+	}
+
+	/** @since 2 */
+	protected void installStyle() {
+		try {
+			applyStyle( FlatStylingSupport.getResolvedStyle( getComponent(), "TextArea" ) );
+		} catch( RuntimeException ex ) {
+			LoggingFacade.INSTANCE.logSevere( null, ex );
 		}
 	}
 
+	/** @since 2 */
+	protected void applyStyle( Object style ) {
+		oldDisabledBackground = disabledBackground;
+		oldInactiveBackground = inactiveBackground;
+
+		oldStyleValues = FlatStylingSupport.parseAndApply( oldStyleValues, style, this::applyStyleProperty );
+
+		updateBackground();
+	}
+
+	/** @since 2 */
+	protected Object applyStyleProperty( String key, Object value ) {
+		return FlatStylingSupport.applyToAnnotatedObjectOrComponent( this, getComponent(), key, value );
+	}
+
+	/** @since 2 */
+	@Override
+	public Map<String, Class<?>> getStyleableInfos( JComponent c ) {
+		return FlatStylingSupport.getAnnotatedStyleableInfos( this );
+	}
+
+	/** @since 2.5 */
+	@Override
+	public Object getStyleableValue( JComponent c, String key ) {
+		return FlatStylingSupport.getAnnotatedStyleableValue( this, key );
+	}
+
 	private void updateBackground() {
-		JTextComponent c = getComponent();
-
-		Color background = c.getBackground();
-		if( !(background instanceof UIResource) )
-			return;
-
-		// do not update background if it currently has a unknown color (assigned from outside)
-		if( background != this.background &&
-			background != disabledBackground &&
-			background != inactiveBackground )
-		  return;
-
-		Color newBackground = !c.isEnabled()
-			? disabledBackground
-			: (!c.isEditable()
-				? inactiveBackground
-				: this.background);
-
-		if( newBackground != background )
-			c.setBackground( newBackground );
+		FlatTextFieldUI.updateBackground( getComponent(), background,
+			disabledBackground, inactiveBackground,
+			oldDisabledBackground, oldInactiveBackground );
 	}
 
 	@Override
@@ -146,7 +214,7 @@ public class FlatTextAreaUI
 		if( c instanceof JTextArea && ((JTextArea)c).getColumns() > 0 )
 			return size;
 
-		return FlatEditorPaneUI.applyMinimumWidth( c, size, minimumWidth );
+		return FlatEditorPaneUI.applyMinimumWidth( c, size, minimumWidth, defaultMargin );
 	}
 
 	@Override
@@ -156,14 +224,6 @@ public class FlatTextAreaUI
 
 	@Override
 	protected void paintBackground( Graphics g ) {
-		JTextComponent c = getComponent();
-
-		// for compatibility with IntelliJ themes
-		if( isIntelliJTheme && (!c.isEnabled() || !c.isEditable()) && (c.getBackground() instanceof UIResource) ) {
-			FlatUIUtils.paintParentBackground( g, c );
-			return;
-		}
-
-		super.paintBackground( g );
+		FlatEditorPaneUI.paintBackground( g, getComponent(), focusedBackground );
 	}
 }

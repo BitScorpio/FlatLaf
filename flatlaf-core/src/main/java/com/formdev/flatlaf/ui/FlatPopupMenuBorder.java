@@ -16,11 +16,15 @@
 
 package com.formdev.flatlaf.ui;
 
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Insets;
+import java.util.Map;
 import javax.swing.JScrollPane;
 import javax.swing.UIManager;
+import com.formdev.flatlaf.ui.FlatStylingSupport.StyleableBorder;
+import com.formdev.flatlaf.ui.FlatStylingSupport.UnknownStyleException;
 import com.formdev.flatlaf.util.UIScale;
 
 /**
@@ -33,10 +37,48 @@ import com.formdev.flatlaf.util.UIScale;
  */
 public class FlatPopupMenuBorder
 	extends FlatLineBorder
+	implements StyleableBorder
 {
+	private Color borderColor;
+
 	public FlatPopupMenuBorder() {
 		super( UIManager.getInsets( "PopupMenu.borderInsets" ),
 			UIManager.getColor( "PopupMenu.borderColor" ) );
+	}
+
+	/** @since 2 */
+	@Override
+	public Object applyStyleProperty( String key, Object value ) {
+		Object oldValue;
+		switch( key ) {
+			case "borderInsets": return applyStyleProperty( (Insets) value );
+			case "borderColor": oldValue = getLineColor(); borderColor = (Color) value; return oldValue;
+		}
+		throw new UnknownStyleException( key );
+	}
+
+	/** @since 2 */
+	@Override
+	public Map<String, Class<?>> getStyleableInfos() {
+		Map<String, Class<?>> infos = new FlatStylingSupport.StyleableInfosMap<>();
+		infos.put( "borderInsets", Insets.class );
+		infos.put( "borderColor", Color.class );
+		return infos;
+	}
+
+	/** @since 2.5 */
+	@Override
+	public Object getStyleableValue( String key ) {
+		switch( key ) {
+			case "borderInsets": return getStyleableValue();
+			case "borderColor": return borderColor;
+		}
+		return null;
+	}
+
+	@Override
+	public Color getLineColor() {
+		return (borderColor != null) ? borderColor : super.getLineColor();
 	}
 
 	@Override

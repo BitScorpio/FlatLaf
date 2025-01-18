@@ -38,6 +38,20 @@
       "pressedBackground": "hoverBackground",
       "pressedBorderColor": "hoverBackground"
     },
+    "Bookmark": {
+      "iconBackground": "accentColor",
+      "Mnemonic": {
+        "iconForeground": "primaryForeground"
+      },
+      "MnemonicAssigned": {
+        "foreground": "primaryForeground",
+        "background": "#786299"
+      },
+      "MnemonicCurrent": {
+        "foreground": "primaryForeground",
+        "background": "#8d6b81"
+      }
+    },
     "Button": {
       "foreground": "primaryForeground",
       "startBorderColor": "selectionBackground",
@@ -75,7 +89,7 @@
       "nonEditableBackground": "secondaryBackground"
     },
     "CompletionPopup": {
-      "selectionBackground": "selectionBackground",
+      "selectionBackground": "selectionInactiveBackground",
       "selectionInactiveBackground": "selectionInactiveBackground",
       "matchForeground": "accentColor"
     },
@@ -90,7 +104,7 @@
       "inactiveWarningFocusColor": "#f1fa8c"
     },
     "DragAndDrop": {
-      "areaBorderColor": "selectionBackground"
+      "borderColor": "selectionBackground"
     },
     "Editor": {
       "background": "secondaryBackground",
@@ -136,6 +150,15 @@
         "informativeBorderColor": "#50fa7b"
       }
     },
+    "NotificationsToolwindow": {
+      "newNotification": {
+        "hoverBackground": "secondaryBackground",
+        "background": "secondaryBackground"
+      },
+      "Notification": {
+        "hoverBackground": "secondaryBackground"
+      }
+    },
     "PasswordField": {
       "background": "secondaryBackground"
     },
@@ -147,7 +170,7 @@
         "foreground": "primaryForeground"
       },
       "hoverBackground": "hoverBackground",
-      "lightSelectionBackground": "hoverBackground",
+      "lightSelectionBackground": "secondaryBackground",
       "Button": {
         "installBorderColor": "secondaryAccentColor",
         "installForeground": "secondaryAccentColor",
@@ -208,9 +231,6 @@
     "SidePanel": {
       "background": "secondaryBackground"
     },
-    "StatusBar": {
-      "hoverBackground": "hoverBackground"
-    },
     "TabbedPane": {
       "tabSelectionHeight": 1,
       "focusColor": "hoverBackground",
@@ -220,7 +240,8 @@
     },
     "Table": {
       "gridColor": "#5d617a",
-      "hoverBackground": "selectionBackground"
+      "hoverBackground": "selectionBackground",
+      "lightSelectionBackground": "secondaryBackground"
     },
     "TableHeader": {
       "bottomSeparatorColor": "separatorColor"
@@ -237,6 +258,7 @@
     },
     "ToolWindow": {
       "Button": {
+        "selectedBackground": "secondaryAccentColor",
         "hoverBackground": "hoverBackground"
       },
       "Header": {
@@ -253,13 +275,12 @@
     "Tree": {
       "modifiedItemForeground": "accentColor",
       "selectionBackground": "selectionBackground",
-      "selectionInactiveBackground": "selectionInactiveBackground"
+      "selectionInactiveBackground": "selectionInactiveBackground",
+      "hash": "hoverBackground"
     },
     "ValidationTooltip": {
-      "errorBackground": "#ff5554",
-      "errorBorderColor": "#ff5554",
-      "warningBorderColor": "#ffb86c",
-      "warningBackground": "#ffb86c"
+      "errorBackground": "#4c273c",
+      "warningBackground": "#4f4b41"
     },
     "VersionControl": {
       "FileHistory": {
@@ -294,8 +315,11 @@
         "selectionBackground": "secondaryBackground",
         "selectionInactiveBackground": "secondaryBackground",
         "actions": {
-          "background": "hoverBackground"
+          "background": "secondaryBackground"
         }
+      },
+      "Details": {
+        "background": "hoverBackground"
       }
     }
   },

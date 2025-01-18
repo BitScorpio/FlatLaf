@@ -23,13 +23,17 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Map.Entry;
 import javax.swing.UIDefaults;
 import javax.swing.plaf.ColorUIResource;
 import com.formdev.flatlaf.json.Json;
@@ -37,6 +41,7 @@ import com.formdev.flatlaf.json.ParseException;
 import com.formdev.flatlaf.util.ColorFunctions;
 import com.formdev.flatlaf.util.LoggingFacade;
 import com.formdev.flatlaf.util.StringUtils;
+import com.formdev.flatlaf.util.SystemInfo;
 
 /**
  * This class supports loading IntelliJ .theme.json files and using them as a Laf.
@@ -60,9 +65,9 @@ public class IntelliJTheme
 
 	private final boolean isMaterialUILite;
 
-	private final Map<String, String> colors;
-	private final Map<String, Object> ui;
-	private final Map<String, Object> icons;
+	private Map<String, String> colors;
+	private Map<String, Object> ui;
+	private Map<String, Object> icons;
 
 	private Map<String, ColorUIResource> namedColors = Collections.emptyMap();
 
@@ -72,6 +77,8 @@ public class IntelliJTheme
 	 *
 	 * The input stream is automatically closed.
 	 * Using a buffered input stream is not necessary.
+	 *
+	 * @since 1.2
 	 */
 	public static boolean setup( InputStream in ) {
 		try {
@@ -162,8 +169,11 @@ public class IntelliJTheme
 		applyCheckBoxColors( defaults );
 
 		// copy values
-		for( Map.Entry<String, String> e : uiKeyCopying.entrySet() )
-			defaults.put( e.getKey(), defaults.get( e.getValue() ) );
+		for( Map.Entry<String, String> e : uiKeyCopying.entrySet() ) {
+			Object value = defaults.get( e.getValue() );
+			if( value != null )
+				defaults.put( e.getKey(), value );
+		}
 
 		// IDEA does not paint button background if disabled, but FlatLaf does
 		Object panelBackground = defaults.get( "Panel.background" );
@@ -175,7 +185,7 @@ public class IntelliJTheme
 		defaults.put( "Button.hoverBorderColor", defaults.get( "Button.focusedBorderColor" ) );
 		defaults.put( "HelpButton.hoverBorderColor", defaults.get( "Button.focusedBorderColor" ) );
 
-		// IDEA uses a SVG icon for the help button, but paints the background with Button.startBackground and Button.endBackground
+		// IDEA uses an SVG icon for the help button, but paints the background with Button.startBackground and Button.endBackground
 		Object helpButtonBackground = defaults.get( "Button.startBackground" );
 		Object helpButtonBorderColor = defaults.get( "Button.startBorderColor" );
 		if( helpButtonBackground == null )
@@ -190,8 +200,9 @@ public class IntelliJTheme
 		defaults.put( "HelpButton.focusedBackground", defaults.get( "Button.focusedBackground" ) );
 
 		// IDEA uses TextField.background for editable ComboBox and Spinner
-		defaults.put( "ComboBox.editableBackground", defaults.get( "TextField.background" ) );
-		defaults.put( "Spinner.background", defaults.get( "TextField.background" ) );
+		Object textFieldBackground = get( defaults, themeSpecificDefaults, "TextField.background" );
+		defaults.put( "ComboBox.editableBackground", textFieldBackground );
+		defaults.put( "Spinner.background", textFieldBackground );
 
 		// Spinner arrow button always has same colors as ComboBox arrow button
 		defaults.put( "Spinner.buttonBackground", defaults.get( "ComboBox.buttonEditableBackground" ) );
@@ -199,22 +210,41 @@ public class IntelliJTheme
 		defaults.put( "Spinner.buttonDisabledArrowColor", defaults.get( "ComboBox.buttonDisabledArrowColor" ) );
 
 		// some themes specify colors for TextField.background, but forget to specify it for other components
-		// (probably because those components are not used in IntelliJ)
-		if( uiKeys.contains( "TextField.background" ) ) {
-			Object textFieldBackground = defaults.get( "TextField.background" );
-			if( !uiKeys.contains( "FormattedTextField.background" ) )
-				defaults.put( "FormattedTextField.background", textFieldBackground );
-			if( !uiKeys.contains( "PasswordField.background" ) )
-				defaults.put( "PasswordField.background", textFieldBackground );
-			if( !uiKeys.contains( "EditorPane.background" ) )
-				defaults.put( "EditorPane.background", textFieldBackground );
-			if( !uiKeys.contains( "TextArea.background" ) )
-				defaults.put( "TextArea.background", textFieldBackground );
-			if( !uiKeys.contains( "TextPane.background" ) )
-				defaults.put( "TextPane.background", textFieldBackground );
-			if( !uiKeys.contains( "Spinner.background" ) )
-				defaults.put( "Spinner.background", textFieldBackground );
-		}
+		// (probably because those components are not used in IntelliJ IDEA)
+		putAll( defaults, textFieldBackground,
+			"EditorPane.background",
+			"FormattedTextField.background",
+			"PasswordField.background",
+			"TextArea.background",
+			"TextPane.background"
+		);
+		putAll( defaults, get( defaults, themeSpecificDefaults, "TextField.selectionBackground" ),
+			"EditorPane.selectionBackground",
+			"FormattedTextField.selectionBackground",
+			"PasswordField.selectionBackground",
+			"TextArea.selectionBackground",
+			"TextPane.selectionBackground"
+		);
+		putAll( defaults, get( defaults, themeSpecificDefaults, "TextField.selectionForeground" ),
+			"EditorPane.selectionForeground",
+			"FormattedTextField.selectionForeground",
+			"PasswordField.selectionForeground",
+			"TextArea.selectionForeground",
+			"TextPane.selectionForeground"
+		);
+
+		// fix disabled and not-editable backgrounds for text components, combobox and spinner
+		// (IntelliJ IDEA does not use those colors; instead it used background color of parent)
+		putAll( defaults, panelBackground,
+			"ComboBox.disabledBackground",
+			"EditorPane.disabledBackground", "EditorPane.inactiveBackground",
+			"FormattedTextField.disabledBackground", "FormattedTextField.inactiveBackground",
+			"PasswordField.disabledBackground", "PasswordField.inactiveBackground",
+			"Spinner.disabledBackground",
+			"TextArea.disabledBackground", "TextArea.inactiveBackground",
+			"TextField.disabledBackground", "TextField.inactiveBackground",
+			"TextPane.disabledBackground", "TextPane.inactiveBackground"
+		);
 
 		// fix ToggleButton
 		if( !uiKeys.contains( "ToggleButton.startBackground" ) && !uiKeys.contains( "*.startBackground" ) )
@@ -241,15 +271,68 @@ public class IntelliJTheme
 		if( rowHeight > 22 )
 			defaults.put( "Tree.rowHeight", 22 );
 
+		// get (and remove) theme specific wildcard replacements, which override all other defaults that end with same suffix
+		HashMap<String, Object> wildcards = new HashMap<>();
+		Iterator<Entry<Object, Object>> it = themeSpecificDefaults.entrySet().iterator();
+		while( it.hasNext() ) {
+			Entry<Object, Object> e = it.next();
+			String key = (String) e.getKey();
+			if( key.startsWith( "*." ) ) {
+				wildcards.put( key.substring( "*.".length() ), e.getValue() );
+				it.remove();
+			}
+		}
+
+		// override UI defaults with theme specific wildcard replacements
+		if( !wildcards.isEmpty() ) {
+			for( Object key : defaults.keySet().toArray() ) {
+				int dot;
+				if( !(key instanceof String) ||
+					(dot = ((String)key).lastIndexOf( '.' )) < 0 )
+				  continue;
+
+				String wildcardKey = ((String)key).substring( dot + 1 );
+				Object wildcardValue = wildcards.get( wildcardKey );
+				if( wildcardValue != null )
+					defaults.put( key, wildcardValue );
+			}
+		}
+
 		// apply theme specific UI defaults at the end to allow overwriting
-		defaults.putAll( themeSpecificDefaults );
+		for( Map.Entry<Object, Object> e : themeSpecificDefaults.entrySet() ) {
+			Object key = e.getKey();
+			Object value = e.getValue();
+
+			// append styles to existing styles
+			if( key instanceof String && ((String)key).startsWith( "[style]" ) ) {
+				Object oldValue = defaults.get( key );
+				if( oldValue != null )
+					value = oldValue + "; " + value;
+			}
+
+			defaults.put( key, value );
+		}
+
+		// let Java release memory
+		colors = null;
+		ui = null;
+		icons = null;
+	}
+
+	private Object get( UIDefaults defaults, Map<Object, Object> themeSpecificDefaults, String key ) {
+		return themeSpecificDefaults.getOrDefault( key, defaults.get( key ) );
+	}
+
+	private void putAll( UIDefaults defaults, Object value, String... keys ) {
+		for( String key : keys )
+			defaults.put( key, value );
 	}
 
 	private Map<Object, Object> removeThemeSpecificDefaults( UIDefaults defaults ) {
 		// search for theme specific UI defaults keys
 		ArrayList<String> themeSpecificKeys = new ArrayList<>();
 		for( Object key : defaults.keySet() ) {
-			if( key instanceof String && ((String)key).startsWith( "[" ) )
+			if( key instanceof String && ((String)key).startsWith( "[" ) && !((String)key).startsWith( "[style]" ) )
 				themeSpecificKeys.add( (String) key );
 		}
 
@@ -284,7 +367,7 @@ public class IntelliJTheme
 
 		for( Map.Entry<String, String> e : colors.entrySet() ) {
 			String value = e.getValue();
-			ColorUIResource color = UIDefaultsLoader.parseColor( value );
+			ColorUIResource color = parseColor( value );
 			if( color != null ) {
 				String key = e.getKey();
 				namedColors.put( key, color );
@@ -299,22 +382,46 @@ public class IntelliJTheme
 	@SuppressWarnings( "unchecked" )
 	private void apply( String key, Object value, UIDefaults defaults, ArrayList<Object> defaultsKeysCache, Set<String> uiKeys ) {
 		if( value instanceof Map ) {
-			for( Map.Entry<String, Object> e : ((Map<String, Object>)value).entrySet() )
-				apply( key + '.' + e.getKey(), e.getValue(), defaults, defaultsKeysCache, uiKeys );
+			Map<String, Object> map = (Map<String, Object>)value;
+			if( map.containsKey( "os.default" ) || map.containsKey( "os.windows" ) || map.containsKey( "os.mac" ) || map.containsKey( "os.linux" ) ) {
+				String osKey = SystemInfo.isWindows ? "os.windows"
+					: SystemInfo.isMacOS ? "os.mac"
+					: SystemInfo.isLinux ? "os.linux" : null;
+				if( osKey != null && map.containsKey( osKey ) )
+					apply( key, map.get( osKey ), defaults, defaultsKeysCache, uiKeys );
+				else if( map.containsKey( "os.default" ) )
+					apply( key, map.get( "os.default" ), defaults, defaultsKeysCache, uiKeys );
+			} else {
+				for( Map.Entry<String, Object> e : map.entrySet() )
+					apply( key + '.' + e.getKey(), e.getValue(), defaults, defaultsKeysCache, uiKeys );
+			}
 		} else {
 			if( "".equals( value ) )
 				return; // ignore empty value
 
-			uiKeys.add( key );
-
-			// fix ComboBox size and Spinner border in all Material UI Lite themes
-			if( isMaterialUILite && (key.equals( "ComboBox.padding" ) || key.equals( "Spinner.border" )) )
-				return; // ignore
+			// ignore some properties that affect sizes
+			if( key.endsWith( ".border" ) ||
+				key.endsWith( ".rowHeight" ) ||
+				key.equals( "ComboBox.padding" ) ||
+				key.equals( "Spinner.padding" ) ||
+				key.equals( "Tree.leftChildIndent" ) ||
+				key.equals( "Tree.rightChildIndent" ) )
+			  return; // ignore
 
 			// map keys
 			key = uiKeyMapping.getOrDefault( key, key );
 			if( key.isEmpty() )
 				return; // ignore key
+
+			// exclude properties
+			int dot = key.indexOf( '.' );
+			if( dot > 0 && uiKeyExcludes.contains( key.substring( 0, dot + 1 ) ) )
+				return;
+
+			if( uiKeyDoNotOverride.contains( key ) && uiKeys.contains( key ) )
+				return;
+
+			uiKeys.add( key );
 
 			String valueStr = value.toString();
 
@@ -338,7 +445,7 @@ public class IntelliJTheme
 
 				// parse value
 				try {
-					uiValue = UIDefaultsLoader.parseValue( key, valueStr );
+					uiValue = UIDefaultsLoader.parseValue( key, valueStr, null );
 				} catch( RuntimeException ex ) {
 					UIDefaultsLoader.logParseError( key, valueStr, ex, false );
 					return; // ignore invalid value
@@ -361,7 +468,8 @@ public class IntelliJTheme
 				// replace all values in UI defaults that match the wildcard key
 				for( Object k : defaultsKeysCache ) {
 					if( k.equals( "Desktop.background" ) ||
-						k.equals( "DesktopIcon.background" ) )
+						k.equals( "DesktopIcon.background" ) ||
+						k.equals( "TabbedPane.focusColor" ) )
 					  continue;
 
 					if( k instanceof String ) {
@@ -419,12 +527,20 @@ public class IntelliJTheme
 		ColorUIResource color = namedColors.get( value );
 
 		// parse color
-		return (color != null) ? color : UIDefaultsLoader.parseColor( value );
+		return (color != null) ? color : parseColor( value );
+	}
+
+	private ColorUIResource parseColor( String value ) {
+		try {
+			return UIDefaultsLoader.parseColor( value );
+		} catch( IllegalArgumentException ex ) {
+			return null;
+		}
 	}
 
 	/**
 	 * Because IDEA uses SVGs for check boxes and radio buttons, the colors for
-	 * this two components are specified in "icons > ColorPalette".
+	 * these two components are specified in "icons > ColorPalette".
 	 * FlatLaf uses vector icons and expects colors for the two components in UI defaults.
 	 */
 	private void applyCheckBoxColors( UIDefaults defaults ) {
@@ -444,18 +560,6 @@ public class IntelliJTheme
 			if( !key.startsWith( "Checkbox." ) || !(value instanceof String) )
 				continue;
 
-			if( key.equals( "Checkbox.Background.Default" ) ||
-				key.equals( "Checkbox.Foreground.Selected" ) )
-			{
-				// This two keys do not work correctly in IDEA because they
-				// map SVG color "#ffffff" to another color, but checkBox.svg and
-				// radio.svg (in package com.intellij.ide.ui.laf.icons.intellij)
-				// use "#fff". So use white to get same appearance as in IDEA.
-				value = "#ffffff";
-			}
-
-			String key2 = checkboxDuplicateColors.get( key );
-
 			if( dark )
 				key = StringUtils.removeTrailing( key, ".Dark" );
 
@@ -469,6 +573,7 @@ public class IntelliJTheme
 				if( color != null ) {
 					defaults.put( newKey, color );
 
+					String key2 = checkboxDuplicateColors.get( key + ".Dark");
 					if( key2 != null ) {
 						// When IDEA replaces colors in SVGs it uses color values and not the keys
 						// from com.intellij.ide.ui.UITheme.colorPalette, but there are some keys that
@@ -504,18 +609,18 @@ public class IntelliJTheme
 			// for filled checkbox/radiobutton used in light themes
 			defaults.remove( "CheckBox.icon[filled].focusWidth" );
 			defaults.put( "CheckBox.icon[filled].hoverBorderColor", defaults.get( "CheckBox.icon[filled].focusedBorderColor" ) );
-			defaults.put( "CheckBox.icon[filled].selectedFocusedBackground", defaults.get( "CheckBox.icon[filled].selectedBackground" ) );
+			defaults.put( "CheckBox.icon[filled].focusedSelectedBackground", defaults.get( "CheckBox.icon[filled].selectedBackground" ) );
 
 			if( dark ) {
 				// IDEA Darcula checkBoxFocused.svg, checkBoxSelectedFocused.svg,
 				// radioFocused.svg and radioSelectedFocused.svg
 				// use opacity=".65" for the border
 				// --> add alpha to focused border colors
-				String[] focusedBorderColorKeys = new String[] {
+				String[] focusedBorderColorKeys = {
 					"CheckBox.icon.focusedBorderColor",
-					"CheckBox.icon.selectedFocusedBorderColor",
+					"CheckBox.icon.focusedSelectedBorderColor",
 					"CheckBox.icon[filled].focusedBorderColor",
-					"CheckBox.icon[filled].selectedFocusedBorderColor",
+					"CheckBox.icon[filled].focusedSelectedBorderColor",
 				};
 				for( String key : focusedBorderColorKeys ) {
 					Color color = defaults.getColor( key );
@@ -533,22 +638,66 @@ public class IntelliJTheme
 			defaults.put( destKey, defaults.get( srcKey ) );
 	}
 
+	private static final Set<String> uiKeyExcludes;
+	private static final Set<String> uiKeyDoNotOverride;
 	/** Rename UI default keys (key --> value). */
-	private static Map<String, String> uiKeyMapping = new HashMap<>();
+	private static final Map<String, String> uiKeyMapping = new HashMap<>();
 	/** Copy UI default keys (value --> key). */
-	private static Map<String, String> uiKeyCopying = new HashMap<>();
-	private static Map<String, String> uiKeyInverseMapping = new HashMap<>();
-	private static Map<String, String> checkboxKeyMapping = new HashMap<>();
-	private static Map<String, String> checkboxDuplicateColors = new HashMap<>();
+	private static final Map<String, String> uiKeyCopying = new LinkedHashMap<>();
+	private static final Map<String, String> uiKeyInverseMapping = new HashMap<>();
+	private static final Map<String, String> checkboxKeyMapping = new HashMap<>();
+	private static final Map<String, String> checkboxDuplicateColors = new HashMap<>();
 
 	static {
+		// IntelliJ UI properties that are not used in FlatLaf
+		uiKeyExcludes = new HashSet<>( Arrays.asList(
+			"ActionButton.", "ActionToolbar.", "ActionsList.", "AppInspector.", "AssignedMnemonic.", "Autocomplete.",
+			"AvailableMnemonic.",
+			"BigSpinner.", "Bookmark.", "BookmarkIcon.", "BookmarkMnemonicAssigned.", "BookmarkMnemonicAvailable.",
+			"BookmarkMnemonicCurrent.", "BookmarkMnemonicIcon.", "Borders.", "Breakpoint.",
+			"Canvas.", "CodeWithMe.", "ComboBoxButton.", "CompletionPopup.", "ComplexPopup.", "Content.",
+			"CurrentMnemonic.", "Counter.",
+			"Debugger.", "DebuggerPopup.", "DebuggerTabs.", "DefaultTabs.", "Dialog.", "DialogWrapper.", "DragAndDrop.",
+			"Editor.", "EditorGroupsTabs.", "EditorTabs.",
+			"FileColor.", "FlameGraph.", "Focus.",
+			"Git.", "Github.", "GotItTooltip.", "Group.", "Gutter.", "GutterTooltip.",
+			"HeaderColor.", "HelpTooltip.", "Hg.",
+			"IconBadge.", "InformationHint.", "InplaceRefactoringPopup.",
+			"Lesson.", "Link.", "LiveIndicator.",
+			"MainMenu.", "MainToolbar.", "MemoryIndicator.", "MlModelBinding.", "MnemonicIcon.",
+			"NavBar.", "NewClass.", "NewPSD.", "Notification.", "Notifications.", "NotificationsToolwindow.",
+			"OnePixelDivider.", "OptionButton.", "Outline.",
+			"ParameterInfo.", "Plugins.", "ProgressIcon.", "PsiViewer.",
+			"ReviewList.", "RunWidget.",
+			"ScreenView.", "SearchEverywhere.", "SearchFieldWithExtension.", "SearchMatch.", "SearchOption.",
+			"SearchResults.", "SegmentedButton.", "Settings.", "SidePanel.", "Space.", "SpeedSearch.", "StateWidget.",
+			"StatusBar.",
+			"Tag.", "TipOfTheDay.", "ToolbarComboWidget.", "ToolWindow.",
+			"UIDesigner.", "UnattendedHostStatus.",
+			"ValidationTooltip.", "VersionControl.",
+			"WelcomeScreen.",
+
+			// lower case
+			"darcula.", "dropArea.", "icons.", "intellijlaf.", "macOSWindow.", "material.", "tooltips.",
+
+			// possible typos in .theme.json files
+			"Checkbox.", "Toolbar.", "Tooltip.", "UiDesigner.", "link."
+		) );
+
+		uiKeyDoNotOverride = new HashSet<>( Arrays.asList(
+			"TabbedPane.selectedForeground"
+		) );
+
 		// ComboBox
 		uiKeyMapping.put( "ComboBox.background",                        "" ); // ignore
+		uiKeyMapping.put( "ComboBox.buttonBackground",                  "" ); // ignore
 		uiKeyMapping.put( "ComboBox.nonEditableBackground",             "ComboBox.background" );
 		uiKeyMapping.put( "ComboBox.ArrowButton.background",            "ComboBox.buttonEditableBackground" );
 		uiKeyMapping.put( "ComboBox.ArrowButton.disabledIconColor",     "ComboBox.buttonDisabledArrowColor" );
 		uiKeyMapping.put( "ComboBox.ArrowButton.iconColor",             "ComboBox.buttonArrowColor" );
 		uiKeyMapping.put( "ComboBox.ArrowButton.nonEditableBackground", "ComboBox.buttonBackground" );
+		uiKeyCopying.put( "ComboBox.buttonSeparatorColor",              "Component.borderColor" );
+		uiKeyCopying.put( "ComboBox.buttonDisabledSeparatorColor",      "Component.disabledBorderColor" );
 
 		// Component
 		uiKeyMapping.put( "Component.inactiveErrorFocusColor",   "Component.error.borderColor" );
@@ -594,6 +743,15 @@ public class IntelliJTheme
 		uiKeyCopying.put( "Slider.thumbColor", "ProgressBar.foreground" );
 		uiKeyCopying.put( "Slider.trackColor", "ProgressBar.background" );
 
+		// Spinner
+		uiKeyCopying.put( "Spinner.buttonSeparatorColor",         "Component.borderColor" );
+		uiKeyCopying.put( "Spinner.buttonDisabledSeparatorColor", "Component.disabledBorderColor" );
+
+		// TabbedPane
+		uiKeyMapping.put( "DefaultTabs.underlinedTabBackground", "TabbedPane.selectedBackground" );
+		uiKeyMapping.put( "DefaultTabs.underlinedTabForeground", "TabbedPane.selectedForeground" );
+		uiKeyMapping.put( "DefaultTabs.inactiveUnderlineColor",  "TabbedPane.inactiveUnderlineColor" );
+
 		// TitlePane
 		uiKeyCopying.put( "TitlePane.inactiveBackground",     "TitlePane.background" );
 		uiKeyMapping.put( "TitlePane.infoForeground",         "TitlePane.foreground" );
@@ -618,7 +776,7 @@ public class IntelliJTheme
 		checkboxKeyMapping.put( "Checkbox.Background.Selected", "CheckBox.icon.selectedBackground" );
 		checkboxKeyMapping.put( "Checkbox.Border.Selected",     "CheckBox.icon.selectedBorderColor" );
 		checkboxKeyMapping.put( "Checkbox.Foreground.Selected", "CheckBox.icon.checkmarkColor" );
-		checkboxKeyMapping.put( "Checkbox.Focus.Thin.Selected", "CheckBox.icon.selectedFocusedBorderColor" );
+		checkboxKeyMapping.put( "Checkbox.Focus.Thin.Selected", "CheckBox.icon.focusedSelectedBorderColor" );
 
 		checkboxDuplicateColors.put( "Checkbox.Background.Default.Dark", "Checkbox.Background.Selected.Dark" );
 		checkboxDuplicateColors.put( "Checkbox.Border.Default.Dark",     "Checkbox.Border.Selected.Dark" );

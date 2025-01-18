@@ -19,6 +19,14 @@ package com.formdev.flatlaf.demo;
 import java.awt.Component;
 import javax.swing.*;
 import javax.swing.text.DefaultEditorKit;
+import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.extras.FlatSVGIcon;
+import com.formdev.flatlaf.icons.FlatSearchIcon;
+import com.formdev.flatlaf.icons.FlatSearchWithHistoryIcon;
+import net.miginfocom.layout.AC;
+import net.miginfocom.layout.BoundSize;
+import net.miginfocom.layout.ConstraintParser;
+import net.miginfocom.layout.DimConstraint;
 import net.miginfocom.swing.*;
 
 /**
@@ -29,6 +37,62 @@ class BasicComponentsPanel
 {
 	BasicComponentsPanel() {
 		initComponents();
+
+		// show reveal button for password field
+		//   to enable this for all password fields use:
+		//   UIManager.put( "PasswordField.showRevealButton", true );
+		passwordField1.putClientProperty( FlatClientProperties.STYLE, "showRevealButton: true" );
+
+		// add leading/trailing icons to text fields
+		leadingIconTextField.putClientProperty( FlatClientProperties.PLACEHOLDER_TEXT, "Search" );
+		leadingIconTextField.putClientProperty( FlatClientProperties.TEXT_FIELD_LEADING_ICON,
+			new FlatSearchIcon() );
+		trailingIconTextField.putClientProperty( FlatClientProperties.TEXT_FIELD_TRAILING_ICON,
+			new FlatSVGIcon( "com/formdev/flatlaf/demo/icons/DataTables.svg" ) );
+		iconsTextField.putClientProperty( FlatClientProperties.TEXT_FIELD_LEADING_ICON,
+			new FlatSVGIcon( "com/formdev/flatlaf/demo/icons/user.svg" ) );
+		iconsTextField.putClientProperty( FlatClientProperties.TEXT_FIELD_TRAILING_ICON,
+			new FlatSVGIcon( "com/formdev/flatlaf/demo/icons/bookmarkGroup.svg" ) );
+
+		// search history button
+		JButton searchHistoryButton = new JButton( new FlatSearchWithHistoryIcon( true ) );
+		searchHistoryButton.setToolTipText( "Search History" );
+		searchHistoryButton.addActionListener( e -> {
+			JPopupMenu popupMenu = new JPopupMenu();
+			popupMenu.add( "(empty)" );
+			popupMenu.show( searchHistoryButton, 0, searchHistoryButton.getHeight() );
+		} );
+		compsTextField.putClientProperty( FlatClientProperties.TEXT_FIELD_LEADING_COMPONENT, searchHistoryButton );
+
+		// match case button
+		JToggleButton matchCaseButton = new JToggleButton( new FlatSVGIcon( "com/formdev/flatlaf/demo/icons/matchCase.svg" ) );
+		matchCaseButton.setRolloverIcon( new FlatSVGIcon( "com/formdev/flatlaf/demo/icons/matchCaseHovered.svg" ) );
+		matchCaseButton.setSelectedIcon( new FlatSVGIcon( "com/formdev/flatlaf/demo/icons/matchCaseSelected.svg" ) );
+		matchCaseButton.setToolTipText( "Match Case" );
+
+		// whole words button
+		JToggleButton wordsButton = new JToggleButton( new FlatSVGIcon( "com/formdev/flatlaf/demo/icons/words.svg" ) );
+		wordsButton.setRolloverIcon( new FlatSVGIcon( "com/formdev/flatlaf/demo/icons/wordsHovered.svg" ) );
+		wordsButton.setSelectedIcon( new FlatSVGIcon( "com/formdev/flatlaf/demo/icons/wordsSelected.svg" ) );
+		wordsButton.setToolTipText( "Whole Words" );
+
+		// regex button
+		JToggleButton regexButton = new JToggleButton( new FlatSVGIcon( "com/formdev/flatlaf/demo/icons/regex.svg" ) );
+		regexButton.setRolloverIcon( new FlatSVGIcon( "com/formdev/flatlaf/demo/icons/regexHovered.svg" ) );
+		regexButton.setSelectedIcon( new FlatSVGIcon( "com/formdev/flatlaf/demo/icons/regexSelected.svg" ) );
+		regexButton.setToolTipText( "Regular Expression" );
+
+		// search toolbar
+		JToolBar searchToolbar = new JToolBar();
+		searchToolbar.add( matchCaseButton );
+		searchToolbar.add( wordsButton );
+		searchToolbar.addSeparator();
+		searchToolbar.add( regexButton );
+		compsTextField.putClientProperty( FlatClientProperties.TEXT_FIELD_TRAILING_COMPONENT, searchToolbar );
+
+		// show clear button (if text field is not empty)
+		compsTextField.putClientProperty( FlatClientProperties.TEXT_FIELD_SHOW_CLEAR_BUTTON, true );
+		clearTextField.putClientProperty( FlatClientProperties.TEXT_FIELD_SHOW_CLEAR_BUTTON, true );
 	}
 
 	private void initComponents() {
@@ -80,7 +144,7 @@ class BasicComponentsPanel
 		JFormattedTextField formattedTextField4 = new JFormattedTextField();
 		JFormattedTextField formattedTextField5 = new JFormattedTextField();
 		JLabel passwordFieldLabel = new JLabel();
-		JPasswordField passwordField1 = new JPasswordField();
+		passwordField1 = new JPasswordField();
 		JPasswordField passwordField2 = new JPasswordField();
 		JPasswordField passwordField3 = new JPasswordField();
 		JPasswordField passwordField4 = new JPasswordField();
@@ -123,6 +187,29 @@ class BasicComponentsPanel
 		JTextField warningHintsTextField = new JTextField();
 		JComboBox<String> warningHintsComboBox = new JComboBox<>();
 		JSpinner warningHintsSpinner = new JSpinner();
+		JLabel iconsLabel = new JLabel();
+		leadingIconTextField = new JTextField();
+		trailingIconTextField = new JTextField();
+		iconsTextField = new JTextField();
+		JLabel compsLabel = new JLabel();
+		compsTextField = new JTextField();
+		clearTextField = new JTextField();
+		JLabel fontsLabel = new JLabel();
+		JLabel h00Label = new JLabel();
+		JLabel h0Label = new JLabel();
+		JLabel h1Label = new JLabel();
+		JLabel h2Label = new JLabel();
+		JLabel h3Label = new JLabel();
+		JLabel h4Label = new JLabel();
+		JLabel lightLabel = new JLabel();
+		JLabel semiboldLabel = new JLabel();
+		JLabel fontZoomLabel = new JLabel();
+		JLabel largeLabel = new JLabel();
+		JLabel defaultLabel = new JLabel();
+		JLabel mediumLabel = new JLabel();
+		JLabel smallLabel = new JLabel();
+		JLabel miniLabel = new JLabel();
+		JLabel monospacedLabel = new JLabel();
 		JPopupMenu popupMenu1 = new JPopupMenu();
 		JMenuItem cutMenuItem = new JMenuItem();
 		JMenuItem copyMenuItem = new JMenuItem();
@@ -132,7 +219,7 @@ class BasicComponentsPanel
 		setLayout(new MigLayout(
 			"insets dialog,hidemode 3",
 			// columns
-			"[sizegroup 1]" +
+			"[]" +
 			"[sizegroup 1]" +
 			"[sizegroup 1]" +
 			"[sizegroup 1]" +
@@ -152,6 +239,10 @@ class BasicComponentsPanel
 			"[]" +
 			"[]para" +
 			"[]" +
+			"[]" +
+			"[]" +
+			"[]" +
+			"[]0" +
 			"[]"));
 
 		//---- labelLabel ----
@@ -186,22 +277,22 @@ class BasicComponentsPanel
 
 		//---- button5 ----
 		button5.setText("Square");
-		button5.putClientProperty("JButton.buttonType", "square");
+		button5.putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_SQUARE);
 		add(button5, "cell 3 1");
 
 		//---- button6 ----
 		button6.setText("Round");
-		button6.putClientProperty("JButton.buttonType", "roundRect");
+		button6.putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_ROUND_RECT);
 		add(button6, "cell 4 1");
 
 		//---- button3 ----
 		button3.setText("Help");
-		button3.putClientProperty("JButton.buttonType", "help");
+		button3.putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_HELP);
 		add(button3, "cell 4 1");
 
 		//---- button4 ----
 		button4.setText("Help");
-		button4.putClientProperty("JButton.buttonType", "help");
+		button4.putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_HELP);
 		button4.setEnabled(false);
 		add(button4, "cell 4 1");
 
@@ -341,7 +432,7 @@ class BasicComponentsPanel
 
 		//---- comboBox6 ----
 		comboBox6.setEditable(true);
-		comboBox6.putClientProperty("JTextField.placeholderText", "Placeholder");
+		comboBox6.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, "Placeholder");
 		add(comboBox6, "cell 5 5,growx");
 
 		//---- textFieldLabel ----
@@ -372,7 +463,7 @@ class BasicComponentsPanel
 		add(textField4, "cell 4 6,growx");
 
 		//---- textField6 ----
-		textField6.putClientProperty("JTextField.placeholderText", "Placeholder");
+		textField6.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, "Placeholder");
 		add(textField6, "cell 5 6,growx");
 
 		//---- formattedTextFieldLabel ----
@@ -403,7 +494,7 @@ class BasicComponentsPanel
 		add(formattedTextField4, "cell 4 7,growx");
 
 		//---- formattedTextField5 ----
-		formattedTextField5.putClientProperty("JTextField.placeholderText", "Placeholder");
+		formattedTextField5.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, "Placeholder");
 		add(formattedTextField5, "cell 5 7,growx");
 
 		//---- passwordFieldLabel ----
@@ -431,7 +522,7 @@ class BasicComponentsPanel
 		add(passwordField4, "cell 4 8,growx");
 
 		//---- passwordField5 ----
-		passwordField5.putClientProperty("JTextField.placeholderText", "Placeholder");
+		passwordField5.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, "Placeholder");
 		add(passwordField5, "cell 5 8,growx");
 
 		//---- textAreaLabel ----
@@ -612,11 +703,11 @@ class BasicComponentsPanel
 		add(errorHintsLabel, "cell 0 12");
 
 		//---- errorHintsTextField ----
-		errorHintsTextField.putClientProperty("JComponent.outline", "error");
+		errorHintsTextField.putClientProperty(FlatClientProperties.OUTLINE, FlatClientProperties.OUTLINE_ERROR);
 		add(errorHintsTextField, "cell 1 12,growx");
 
 		//---- errorHintsComboBox ----
-		errorHintsComboBox.putClientProperty("JComponent.outline", "error");
+		errorHintsComboBox.putClientProperty(FlatClientProperties.OUTLINE, FlatClientProperties.OUTLINE_ERROR);
 		errorHintsComboBox.setModel(new DefaultComboBoxModel<>(new String[] {
 			"Editable"
 		}));
@@ -624,7 +715,7 @@ class BasicComponentsPanel
 		add(errorHintsComboBox, "cell 2 12,growx");
 
 		//---- errorHintsSpinner ----
-		errorHintsSpinner.putClientProperty("JComponent.outline", "error");
+		errorHintsSpinner.putClientProperty(FlatClientProperties.OUTLINE, FlatClientProperties.OUTLINE_ERROR);
 		add(errorHintsSpinner, "cell 3 12,growx");
 
 		//---- warningHintsLabel ----
@@ -632,19 +723,120 @@ class BasicComponentsPanel
 		add(warningHintsLabel, "cell 0 13");
 
 		//---- warningHintsTextField ----
-		warningHintsTextField.putClientProperty("JComponent.outline", "warning");
+		warningHintsTextField.putClientProperty(FlatClientProperties.OUTLINE, FlatClientProperties.OUTLINE_WARNING);
 		add(warningHintsTextField, "cell 1 13,growx");
 
 		//---- warningHintsComboBox ----
-		warningHintsComboBox.putClientProperty("JComponent.outline", "warning");
+		warningHintsComboBox.putClientProperty(FlatClientProperties.OUTLINE, FlatClientProperties.OUTLINE_WARNING);
 		warningHintsComboBox.setModel(new DefaultComboBoxModel<>(new String[] {
 			"Not editable"
 		}));
 		add(warningHintsComboBox, "cell 2 13,growx");
 
 		//---- warningHintsSpinner ----
-		warningHintsSpinner.putClientProperty("JComponent.outline", "warning");
+		warningHintsSpinner.putClientProperty(FlatClientProperties.OUTLINE, FlatClientProperties.OUTLINE_WARNING);
 		add(warningHintsSpinner, "cell 3 13,growx");
+
+		//---- iconsLabel ----
+		iconsLabel.setText("Leading/trailing icons:");
+		add(iconsLabel, "cell 0 14");
+		add(leadingIconTextField, "cell 1 14,growx");
+
+		//---- trailingIconTextField ----
+		trailingIconTextField.setText("text");
+		add(trailingIconTextField, "cell 2 14,growx");
+
+		//---- iconsTextField ----
+		iconsTextField.setText("text");
+		add(iconsTextField, "cell 3 14,growx");
+
+		//---- compsLabel ----
+		compsLabel.setText("Leading/trailing comp.:");
+		add(compsLabel, "cell 0 15");
+		add(compsTextField, "cell 1 15 2 1,growx");
+
+		//---- clearTextField ----
+		clearTextField.setText("clear me");
+		add(clearTextField, "cell 3 15,growx");
+
+		//---- fontsLabel ----
+		fontsLabel.setText("Typography / Fonts:");
+		add(fontsLabel, "cell 0 16");
+
+		//---- h00Label ----
+		h00Label.setText("H00");
+		h00Label.putClientProperty(FlatClientProperties.STYLE_CLASS, "h00");
+		add(h00Label, "cell 1 16 5 1");
+
+		//---- h0Label ----
+		h0Label.setText("H0");
+		h0Label.putClientProperty(FlatClientProperties.STYLE_CLASS, "h0");
+		add(h0Label, "cell 1 16 5 1");
+
+		//---- h1Label ----
+		h1Label.setText("H1");
+		h1Label.putClientProperty(FlatClientProperties.STYLE_CLASS, "h1");
+		add(h1Label, "cell 1 16 5 1");
+
+		//---- h2Label ----
+		h2Label.setText("H2");
+		h2Label.putClientProperty(FlatClientProperties.STYLE_CLASS, "h2");
+		add(h2Label, "cell 1 16 5 1");
+
+		//---- h3Label ----
+		h3Label.setText("H3");
+		h3Label.putClientProperty(FlatClientProperties.STYLE_CLASS, "h3");
+		add(h3Label, "cell 1 16 5 1");
+
+		//---- h4Label ----
+		h4Label.setText("H4");
+		h4Label.putClientProperty(FlatClientProperties.STYLE_CLASS, "h4");
+		add(h4Label, "cell 1 16 5 1");
+
+		//---- lightLabel ----
+		lightLabel.setText("light");
+		lightLabel.putClientProperty(FlatClientProperties.STYLE, "font: 200% $light.font");
+		add(lightLabel, "cell 1 16 5 1,gapx 30");
+
+		//---- semiboldLabel ----
+		semiboldLabel.setText("semibold");
+		semiboldLabel.putClientProperty(FlatClientProperties.STYLE, "font: 200% $semibold.font");
+		add(semiboldLabel, "cell 1 16 5 1");
+
+		//---- fontZoomLabel ----
+		fontZoomLabel.setText("(200%)");
+		fontZoomLabel.putClientProperty(FlatClientProperties.STYLE_CLASS, "small");
+		fontZoomLabel.setEnabled(false);
+		add(fontZoomLabel, "cell 1 16 5 1");
+
+		//---- largeLabel ----
+		largeLabel.setText("large");
+		largeLabel.putClientProperty(FlatClientProperties.STYLE_CLASS, "large");
+		add(largeLabel, "cell 1 17 5 1");
+
+		//---- defaultLabel ----
+		defaultLabel.setText("default");
+		add(defaultLabel, "cell 1 17 5 1");
+
+		//---- mediumLabel ----
+		mediumLabel.setText("medium");
+		mediumLabel.putClientProperty(FlatClientProperties.STYLE_CLASS, "medium");
+		add(mediumLabel, "cell 1 17 5 1");
+
+		//---- smallLabel ----
+		smallLabel.setText("small");
+		smallLabel.putClientProperty(FlatClientProperties.STYLE_CLASS, "small");
+		add(smallLabel, "cell 1 17 5 1");
+
+		//---- miniLabel ----
+		miniLabel.setText("mini");
+		miniLabel.putClientProperty(FlatClientProperties.STYLE_CLASS, "mini");
+		add(miniLabel, "cell 1 17 5 1");
+
+		//---- monospacedLabel ----
+		monospacedLabel.setText("monospaced");
+		monospacedLabel.putClientProperty(FlatClientProperties.STYLE_CLASS, "monospaced");
+		add(monospacedLabel, "cell 1 17 5 1,gapx 30");
 
 		//======== popupMenu1 ========
 		{
@@ -671,33 +863,66 @@ class BasicComponentsPanel
 		pasteMenuItem.addActionListener( new DefaultEditorKit.PasteAction() );
 
 		if( FlatLafDemo.screenshotsMode ) {
-			Component[] components = {
+			// hide some components
+			Component[] hiddenComponents = {
+				labelLabel, label1, label2,
 				button13, button14, button15, button16, comboBox5, comboBox6,
-				textField6, passwordField5,
 
+				textFieldLabel, textField2, textField4, textField6,
 				formattedTextFieldLabel, formattedTextField1, formattedTextField2, formattedTextField3, formattedTextField4, formattedTextField5,
+				passwordFieldLabel, passwordField1, passwordField2, passwordField3, passwordField4, passwordField5,
 				textAreaLabel, scrollPane1, scrollPane2, scrollPane3, scrollPane4, textArea5,
 				editorPaneLabel, scrollPane5, scrollPane6, scrollPane7, scrollPane8, editorPane5,
 				textPaneLabel, scrollPane9, scrollPane10, scrollPane11, scrollPane12, textPane5,
 
 				errorHintsLabel, errorHintsTextField, errorHintsComboBox, errorHintsSpinner,
 				warningHintsLabel, warningHintsTextField, warningHintsComboBox, warningHintsSpinner,
-			};
 
-			for( Component c : components )
+				fontZoomLabel,
+			};
+			for( Component c : hiddenComponents )
 				c.setVisible( false );
 
-			// move password fields one row up
-			Component[] formattedTextFields = { formattedTextFieldLabel, formattedTextField1, formattedTextField2, formattedTextField3, formattedTextField4 };
-			Component[] passwordFields = { passwordFieldLabel, passwordField1, passwordField2, passwordField3, passwordField4 };
+			// update layout (change row gaps to zero)
 			MigLayout layout = (MigLayout) getLayout();
-			for( int i = 0; i < passwordFields.length; i++ ) {
-				Object cons = layout.getComponentConstraints( formattedTextFields[i] );
-				layout.setComponentConstraints( passwordFields[i], cons );
-			}
+			Object rowCons = layout.getRowConstraints();
+			AC ac = (rowCons instanceof String)
+				? ConstraintParser.parseColumnConstraints( (String) rowCons )
+				: (AC) rowCons;
+			BoundSize zeroGap = ConstraintParser.parseBoundSize( "0", true, true );
+			DimConstraint[] rows = ac.getConstaints();
+			rows[6].setGapBefore( zeroGap );
+			rows[7].setGapBefore( zeroGap );
+			rows[8].setGapBefore( zeroGap );
+			rows[9].setGapBefore( zeroGap );
+			rows[10].setGapBefore( zeroGap );
+			rows[11].setGapBefore( zeroGap );
+			rows[11].setGapAfter( zeroGap );
+			rows[12].setGapBefore( zeroGap );
+			rows[13].setGapBefore( zeroGap );
+			rows[16].setGapBefore( zeroGap );
+			layout.setRowConstraints( ac );
+
+			// move two text field into same row as spinners
+			spinnerLabel.setText( "JSpinner / JTextField:" );
+			layout.setComponentConstraints( textField1, "cell 3 5,growx" );
+			layout.setComponentConstraints( textField3, "cell 4 5,growx" );
+
+			// make "Not editable disabled" combobox smaller
+			Object cons = layout.getComponentConstraints( comboBox4 );
+			layout.setComponentConstraints( comboBox4, cons + ",width 50:50" );
+
+			revalidate();
+			repaint();
 		}
 	}
 
 	// JFormDesigner - Variables declaration - DO NOT MODIFY  //GEN-BEGIN:variables
+	private JPasswordField passwordField1;
+	private JTextField leadingIconTextField;
+	private JTextField trailingIconTextField;
+	private JTextField iconsTextField;
+	private JTextField compsTextField;
+	private JTextField clearTextField;
 	// JFormDesigner - End of variables declaration  //GEN-END:variables
 }

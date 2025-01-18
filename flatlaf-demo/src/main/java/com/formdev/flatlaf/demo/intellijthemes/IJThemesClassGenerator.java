@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import com.formdev.flatlaf.util.LoggingFacade;
 
 /**
  * This tool creates look and feel classes for all themes listed in themes.json.
@@ -42,7 +43,7 @@ public class IJThemesClassGenerator
 		markdownTable.append( "-----|------\n" );
 
 		for( IJThemeInfo ti : themesManager.bundledThemes ) {
-			if( ti.sourceCodeUrl == null || ti.sourceCodePath == null )
+			if( ti.sourceCodeUrl == null )
 				continue;
 
 			generateClass( ti, toPath, allInfos, markdownTable );
@@ -76,7 +77,7 @@ public class IJThemesClassGenerator
 			themeName += " (Material)";
 
 		StringBuilder buf = new StringBuilder();
-		for( String n : name.split( " " ) ) {
+		for( String n : name.split( "[ \\-]" ) ) {
 			if( n.length() == 0 || n.equals( "-" ) )
 				continue;
 
@@ -120,7 +121,7 @@ public class IJThemesClassGenerator
 			Files.write( out, content.getBytes( StandardCharsets.ISO_8859_1 ),
 				StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING );
 		} catch( IOException ex ) {
-			ex.printStackTrace();
+			LoggingFacade.INSTANCE.logSevere( null, ex );
 		}
 	}
 
@@ -166,14 +167,6 @@ public class IJThemesClassGenerator
 		"		} catch( RuntimeException ex ) {\n" +
 		"			return false;\n" +
 		"		}\n" +
-		"	}\n" +
-		"\n" +
-		"	/**\n" +
-		"	 * @deprecated use {@link #setup()} instead; this method will be removed in a future version\n" +
-		"	 */\n" +
-		"	@Deprecated\n" +
-		"	public static boolean install() {\n" +
-		"		return setup();\n" +
 		"	}\n" +
 		"\n" +
 		"	public static void installLafInfo() {\n" +

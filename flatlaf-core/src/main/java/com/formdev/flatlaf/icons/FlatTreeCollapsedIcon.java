@@ -16,10 +16,17 @@
 
 package com.formdev.flatlaf.icons;
 
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Graphics2D;
+import java.awt.geom.Path2D;
+import java.util.function.Function;
+import javax.swing.JTree;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
+import javax.swing.plaf.TreeUI;
+import com.formdev.flatlaf.ui.FlatTreeUI;
 import com.formdev.flatlaf.ui.FlatUIUtils;
 
 /**
@@ -34,6 +41,7 @@ public class FlatTreeCollapsedIcon
 	extends FlatAbstractIcon
 {
 	private final boolean chevron;
+	private Path2D path;
 
 	public FlatTreeCollapsedIcon() {
 		this( UIManager.getColor( "Tree.icon.collapsedColor" ) );
@@ -46,19 +54,54 @@ public class FlatTreeCollapsedIcon
 
 	@Override
 	protected void paintIcon( Component c, Graphics2D g ) {
+		setStyleColorFromTreeUI( c, g );
 		rotate( c, g );
+
+		String arrowType = getStyleFromTreeUI( c, ui -> ui.iconArrowType );
+		boolean chevron = (arrowType != null) ? FlatUIUtils.isChevron( arrowType ) : this.chevron;
 
 		if( chevron ) {
 			// chevron arrow
-			g.fill( FlatUIUtils.createPath( 3,1, 3,2.5, 6,5.5, 3,8.5, 3,10, 4.5,10, 9,5.5, 4.5,1 ) );
+			g.setStroke( new BasicStroke( 1f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_MITER ) );
+			if( path == null )
+				path = FlatUIUtils.createPath( false, 3.5,1.5, 7.5,5.5, 3.5,9.5 );
+			g.draw( path );
 		} else {
 			// triangle arrow
-			g.fill( FlatUIUtils.createPath( 2,1, 2,10, 10,5.5 ) );
+			if( path == null )
+				path = FlatUIUtils.createPath( 2,1, 2,10, 10,5.5 );
+			g.fill( path );
 		}
+	}
+
+	void setStyleColorFromTreeUI( Component c, Graphics2D g ) {
+		setStyleColorFromTreeUI( c, g, ui -> ui.iconCollapsedColor );
 	}
 
 	void rotate( Component c, Graphics2D g ) {
 		if( !c.getComponentOrientation().isLeftToRight() )
 			g.rotate( Math.toRadians( 180 ), width / 2., height / 2. );
+	}
+
+	/**
+	 * Because this icon is always shared for all trees,
+	 * get icon specific style from FlatTreeUI.
+	 */
+	static <T> T getStyleFromTreeUI( Component c, Function<FlatTreeUI, T> f ) {
+		JTree tree = (c instanceof JTree)
+			? (JTree) c
+			: (JTree) SwingUtilities.getAncestorOfClass( JTree.class, c );
+		if( tree != null ) {
+			TreeUI ui = tree.getUI();
+			if( ui instanceof FlatTreeUI )
+				return f.apply( (FlatTreeUI) ui );
+		}
+		return null;
+	}
+
+	static void setStyleColorFromTreeUI( Component c, Graphics2D g, Function<FlatTreeUI, Color> f ) {
+		Color color = getStyleFromTreeUI( c, f );
+		if( color != null )
+			g.setColor( color );
 	}
 }

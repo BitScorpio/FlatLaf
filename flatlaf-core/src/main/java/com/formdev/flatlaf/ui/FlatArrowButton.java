@@ -25,6 +25,7 @@ import java.awt.Graphics2D;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import javax.swing.JComponent;
+import javax.swing.SwingUtilities;
 import javax.swing.plaf.UIResource;
 import javax.swing.plaf.basic.BasicArrowButton;
 
@@ -37,19 +38,21 @@ public class FlatArrowButton
 	extends BasicArrowButton
 	implements UIResource
 {
-	public static final int DEFAULT_ARROW_WIDTH = 8;
+	public static final int DEFAULT_ARROW_WIDTH = 9;
 
-	protected final boolean chevron;
-	protected final Color foreground;
-	protected final Color disabledForeground;
-	protected final Color hoverForeground;
-	protected final Color hoverBackground;
-	protected final Color pressedForeground;
-	protected final Color pressedBackground;
+	protected boolean chevron;
+	protected Color foreground;
+	protected Color disabledForeground;
+	protected Color hoverForeground;
+	protected Color hoverBackground;
+	protected Color pressedForeground;
+	protected Color pressedBackground;
 
 	private int arrowWidth = DEFAULT_ARROW_WIDTH;
-	private int xOffset = 0;
-	private int yOffset = 0;
+	private float arrowThickness = 1;
+	private float xOffset = 0;
+	private float yOffset = 0;
+	private boolean roundBorderAutoXOffset = true;
 
 	private boolean hover;
 	private boolean pressed;
@@ -58,14 +61,8 @@ public class FlatArrowButton
 		Color hoverForeground, Color hoverBackground, Color pressedForeground, Color pressedBackground )
 	{
 		super( direction, Color.WHITE, Color.WHITE, Color.WHITE, Color.WHITE );
-
-		this.chevron = FlatUIUtils.isChevron( type );
-		this.foreground = foreground;
-		this.disabledForeground = disabledForeground;
-		this.hoverForeground = hoverForeground;
-		this.hoverBackground = hoverBackground;
-		this.pressedForeground = pressedForeground;
-		this.pressedBackground = pressedBackground;
+		updateStyle( type, foreground, disabledForeground, hoverForeground, hoverBackground,
+			pressedForeground, pressedBackground );
 
 		setOpaque( false );
 		setBorder( null );
@@ -88,17 +85,34 @@ public class FlatArrowButton
 
 				@Override
 				public void mousePressed( MouseEvent e ) {
-					pressed = true;
-					repaint();
+					if( SwingUtilities.isLeftMouseButton( e ) ) {
+						pressed = true;
+						repaint();
+					}
 				}
 
 				@Override
 				public void mouseReleased( MouseEvent e ) {
-					pressed = false;
-					repaint();
+					if( SwingUtilities.isLeftMouseButton( e ) ) {
+						pressed = false;
+						repaint();
+					}
 				}
 			} );
 		}
+	}
+
+	/** @since 2 */
+	public void updateStyle( String type, Color foreground, Color disabledForeground,
+		Color hoverForeground, Color hoverBackground, Color pressedForeground, Color pressedBackground )
+	{
+		this.chevron = FlatUIUtils.isChevron( type );
+		this.foreground = foreground;
+		this.disabledForeground = disabledForeground;
+		this.hoverForeground = hoverForeground;
+		this.hoverBackground = hoverBackground;
+		this.pressedForeground = pressedForeground;
+		this.pressedBackground = pressedBackground;
 	}
 
 	public int getArrowWidth() {
@@ -109,6 +123,16 @@ public class FlatArrowButton
 		this.arrowWidth = arrowWidth;
 	}
 
+	/** @since 3 */
+	public float getArrowThickness() {
+		return arrowThickness;
+	}
+
+	/** @since 3 */
+	public void setArrowThickness( float arrowThickness ) {
+		this.arrowThickness = arrowThickness;
+	}
+
 	protected boolean isHover() {
 		return hover;
 	}
@@ -117,20 +141,30 @@ public class FlatArrowButton
 		return pressed;
 	}
 
-	public int getXOffset() {
+	public float getXOffset() {
 		return xOffset;
 	}
 
-	public void setXOffset( int xOffset ) {
+	public void setXOffset( float xOffset ) {
 		this.xOffset = xOffset;
 	}
 
-	public int getYOffset() {
+	public float getYOffset() {
 		return yOffset;
 	}
 
-	public void setYOffset( int yOffset ) {
+	public void setYOffset( float yOffset ) {
 		this.yOffset = yOffset;
+	}
+
+	/** @since 3 */
+	public boolean isRoundBorderAutoXOffset() {
+		return roundBorderAutoXOffset;
+	}
+
+	/** @since 3 */
+	public void setRoundBorderAutoXOffset( boolean roundBorderAutoXOffset ) {
+		this.roundBorderAutoXOffset = roundBorderAutoXOffset;
 	}
 
 	protected Color deriveBackground( Color background ) {
@@ -139,6 +173,21 @@ public class FlatArrowButton
 
 	protected Color deriveForeground( Color foreground ) {
 		return FlatUIUtils.deriveColor( foreground, this.foreground );
+	}
+
+	/**
+	 * Returns the color used to paint the arrow.
+	 *
+	 * @since 1.2
+	 */
+	protected Color getArrowColor() {
+		return isEnabled()
+			? (pressedForeground != null && isPressed()
+				? pressedForeground
+				: (hoverForeground != null && isHover()
+					? hoverForeground
+					: foreground))
+			: disabledForeground;
 	}
 
 	@Override
@@ -170,13 +219,7 @@ public class FlatArrowButton
 		}
 
 		// paint arrow
-		g.setColor( deriveForeground( isEnabled()
-			? (pressedForeground != null && isPressed()
-				? pressedForeground
-				: (hoverForeground != null && isHover()
-					? hoverForeground
-					: foreground))
-			: disabledForeground ) );
+		g.setColor( deriveForeground( getArrowColor() ) );
 		paintArrow( (Graphics2D) g );
 
 		FlatUIUtils.resetRenderingHints( g, oldRenderingHints );
@@ -187,14 +230,17 @@ public class FlatArrowButton
 	}
 
 	protected void paintArrow( Graphics2D g ) {
-		boolean vert = (direction == NORTH || direction == SOUTH);
 		int x = 0;
 
 		// move arrow for round borders
-		Container parent = getParent();
-		if( vert && parent instanceof JComponent && FlatUIUtils.hasRoundBorder( (JComponent) parent ) )
-			x -= scale( parent.getComponentOrientation().isLeftToRight() ? 1 : -1 );
+		if( isRoundBorderAutoXOffset() ) {
+			Container parent = getParent();
+			boolean vert = (direction == NORTH || direction == SOUTH);
+			if( vert && parent instanceof JComponent && FlatUIUtils.hasRoundBorder( (JComponent) parent ) )
+				x -= scale( parent.getComponentOrientation().isLeftToRight() ? 1 : -1 );
+		}
 
-		FlatUIUtils.paintArrow( g, x, 0, getWidth(), getHeight(), getDirection(), chevron, arrowWidth, xOffset, yOffset );
+		FlatUIUtils.paintArrow( g, x, 0, getWidth(), getHeight(), getDirection(), chevron,
+			getArrowWidth(), getArrowThickness(), getXOffset(), getYOffset() );
 	}
 }

@@ -21,15 +21,18 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Graphics2D;
 import java.awt.geom.Path2D;
+import java.util.Map;
 import javax.swing.AbstractButton;
 import javax.swing.JMenuItem;
 import javax.swing.UIManager;
+import com.formdev.flatlaf.ui.FlatStylingSupport;
+import com.formdev.flatlaf.ui.FlatStylingSupport.Styleable;
 
 /**
  * Icon for {@link javax.swing.JCheckBoxMenuItem}.
  *
- * @uiDefault MenuItemCheckBox.icon.checkmarkColor				Color
- * @uiDefault MenuItemCheckBox.icon.disabledCheckmarkColor		Color
+ * @uiDefault CheckBoxMenuItem.icon.checkmarkColor				Color
+ * @uiDefault CheckBoxMenuItem.icon.disabledCheckmarkColor		Color
  * @uiDefault MenuItem.selectionForeground						Color
  * @uiDefault MenuItem.selectionType							String
  *
@@ -38,12 +41,27 @@ import javax.swing.UIManager;
 public class FlatCheckBoxMenuItemIcon
 	extends FlatAbstractIcon
 {
-	protected final Color checkmarkColor = UIManager.getColor( "MenuItemCheckBox.icon.checkmarkColor" );
-	protected final Color disabledCheckmarkColor = UIManager.getColor( "MenuItemCheckBox.icon.disabledCheckmarkColor" );
-	protected final Color selectionForeground = UIManager.getColor( "MenuItem.selectionForeground" );
+	@Styleable protected Color checkmarkColor = UIManager.getColor( "CheckBoxMenuItem.icon.checkmarkColor" );
+	@Styleable protected Color disabledCheckmarkColor = UIManager.getColor( "CheckBoxMenuItem.icon.disabledCheckmarkColor" );
+	@Styleable protected Color selectionForeground = UIManager.getColor( "MenuItem.selectionForeground" );
 
 	public FlatCheckBoxMenuItemIcon() {
 		super( 15, 15, null );
+	}
+
+	/** @since 2 */
+	public Object applyStyleProperty( String key, Object value ) {
+		return FlatStylingSupport.applyToAnnotatedObject( this, key, value );
+	}
+
+	/** @since 2 */
+	public Map<String, Class<?>> getStyleableInfos() {
+		return FlatStylingSupport.getAnnotatedStyleableInfos( this );
+	}
+
+	/** @since 2.5 */
+	public Object getStyleableValue( String key ) {
+		return FlatStylingSupport.getAnnotatedStyleableValue( this, key );
 	}
 
 	@Override
@@ -58,7 +76,7 @@ public class FlatCheckBoxMenuItemIcon
 	}
 
 	protected void paintCheckmark( Graphics2D g2 ) {
-		Path2D.Float path = new Path2D.Float();
+		Path2D.Float path = new Path2D.Float( Path2D.WIND_NON_ZERO, 3 );
 		path.moveTo( 4.5f, 7.5f );
 		path.lineTo( 6.6f, 10f );
 		path.lineTo( 11.25f, 3.5f );

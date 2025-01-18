@@ -20,6 +20,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -60,6 +61,35 @@ public class NativeLibrary
 	}
 
 	/**
+	 * Load native library from given file.
+	 *
+	 * @param libraryFile the file of the native library
+	 * @param supported whether the native library is supported on the current platform
+	 * @since 2
+	 */
+	public NativeLibrary( File libraryFile, boolean supported ) {
+		this.loaded = supported
+			? loadLibraryFromFile( libraryFile )
+			: false;
+	}
+
+	/**
+	 * Load native library using {@link System#loadLibrary(String)}.
+	 * Searches for the library in classloader of caller
+	 * (using {@link ClassLoader#findLibrary(String)}) and in paths specified
+	 * in system properties {@code sun.boot.library.path} and {@code java.library.path}.
+	 *
+	 * @param libraryName name of the native library (without "lib" prefix and without extension)
+	 * @param supported whether the native library is supported on the current platform
+	 * @since 2.6
+	 */
+	public NativeLibrary( String libraryName, boolean supported ) {
+		this.loaded = supported
+			? loadLibraryFromSystem( libraryName )
+			: false;
+	}
+
+	/**
 	 * Returns whether the native library is loaded.
 	 * <p>
 	 * Returns {@code false} if not supported on current platform as specified in constructor
@@ -78,7 +108,7 @@ public class NativeLibrary
 			? classLoader.getResource( libraryName )
 			: NativeLibrary.class.getResource( "/" + libraryName );
 		if( libraryUrl == null ) {
-			log( "Library '" + libraryName + "' not found", null );
+			LoggingFacade.INSTANCE.logSevere( "Library '" + libraryName + "' not found", null );
 			return false;
 		}
 
@@ -86,7 +116,11 @@ public class NativeLibrary
 		try {
 			// for development environment
 			if( "file".equals( libraryUrl.getProtocol() ) ) {
-				File libraryFile = new File( libraryUrl.getPath() );
+				String binPath = libraryUrl.getPath();
+				String srcPath = binPath.replace( "flatlaf-core/bin/main/", "flatlaf-core/src/main/resources/" );
+				File libraryFile = new File( srcPath ); // use from 'src' folder if available
+				if( !libraryFile.isFile() )
+					libraryFile = new File( binPath ); // use from 'bin' or 'output' folder if available
 				if( libraryFile.isFile() ) {
 					// load library without copying
 					System.load( libraryFile.getCanonicalPath() );
@@ -111,7 +145,7 @@ public class NativeLibrary
 
 			return true;
 		} catch( Throwable ex ) {
-			log( null, ex );
+			LoggingFacade.INSTANCE.logSevere( ex.getMessage(), ex );
 
 			if( tempFile != null )
 				deleteOrMarkForDeletion( tempFile );
@@ -119,20 +153,46 @@ public class NativeLibrary
 		}
 	}
 
-	private static String decorateLibraryName( String libraryName ) {
-		if( SystemInfo.isWindows )
-			return libraryName.concat( ".dll" );
-
-		String suffix = SystemInfo.isMacOS ? ".dylib" : ".so";
-
-		int sep = libraryName.lastIndexOf( '/' );
-		return (sep >= 0)
-			? libraryName.substring( 0, sep + 1 ) + "lib" + libraryName.substring( sep + 1 ) + suffix
-			: "lib" + libraryName + suffix;
+	private boolean loadLibraryFromFile( File libraryFile ) {
+		try {
+			System.load( libraryFile.getAbsolutePath() );
+			return true;
+		} catch( Throwable ex ) {
+			LoggingFacade.INSTANCE.logSevere( ex.getMessage(), ex );
+			return false;
+		}
 	}
 
-	private static void log( String msg, Throwable thrown ) {
-		LoggingFacade.INSTANCE.logSevere( msg, thrown );
+	private boolean loadLibraryFromSystem( String libraryName ) {
+		try {
+			System.loadLibrary( libraryName );
+			return true;
+		} catch( Throwable ex ) {
+			String message = ex.getMessage();
+
+			// do not log error if library was not found
+			// thrown in ClassLoader.loadLibrary(Class<?> fromClass, String name, boolean isAbsolute)
+			if( ex instanceof UnsatisfiedLinkError && message != null && message.contains( "java.library.path" ) )
+				return false;
+
+			LoggingFacade.INSTANCE.logSevere( message, ex );
+			return false;
+		}
+	}
+
+	/**
+	 * Add prefix and suffix to library name.
+	 * <ul>
+	 * <li>Windows: libraryName + ".dll"
+	 * <li>macOS: "lib" + libraryName + ".dylib"
+	 * <li>Linux: "lib" + libraryName + ".so"
+	 * </ul>
+	 */
+	private static String decorateLibraryName( String libraryName ) {
+		int sep = libraryName.lastIndexOf( '/' );
+		return (sep >= 0)
+			? libraryName.substring( 0, sep + 1 ) + System.mapLibraryName( libraryName.substring( sep + 1 ) )
+			: System.mapLibraryName( libraryName );
 	}
 
 	private static Path createTempFile( String libraryName ) throws IOException {
@@ -144,26 +204,46 @@ public class NativeLibrary
 		String suffix = (dot >= 0) ? name.substring( dot ) : "";
 
 		Path tempDir = getTempDir();
-		if( tempDir != null ) {
-			deleteTemporaryFiles( tempDir );
 
-			return Files.createTempFile( tempDir, prefix, suffix );
-		} else
-			return Files.createTempFile( prefix, suffix );
+		// Note:
+		// Not using Files.createTempFile() here because it uses random number generator SecureRandom,
+		// which may take 5-10 seconds to initialize under particular conditions.
+
+		// Use current time in nanoseconds instead of a random number.
+		// To avoid (theoretical) collisions, append a counter.
+		long nanoTime = System.nanoTime();
+		for( int i = 0;; i++ ) {
+			String s = prefix + Long.toUnsignedString( nanoTime ) + i + suffix;
+			try {
+				return Files.createFile( tempDir.resolve( s ) );
+			} catch( FileAlreadyExistsException ex ) {
+				// ignore --> increment counter and try again
+			}
+		}
 	}
 
 	private static Path getTempDir() throws IOException {
+		// get standard temporary directory
+		String tmpdir = System.getProperty( "java.io.tmpdir" );
+
 		if( SystemInfo.isWindows ) {
 			// On Windows, where File.delete() and File.deleteOnExit() does not work
 			// for loaded native libraries, they will be deleted on next application startup.
 			// The default temporary directory may contain hundreds or thousands of files.
 			// To make searching for "marked for deletion" files as fast as possible,
-			// use a sub directory that contains only our temporary native libraries.
-			Path tempDir = Paths.get( System.getProperty( "java.io.tmpdir" ) + "/flatlaf.temp" );
-			Files.createDirectories( tempDir );
-			return tempDir;
-		} else
-			return null; // use standard temporary directory
+			// use a subdirectory that contains only our temporary native libraries.
+			tmpdir += "\\flatlaf.temp";
+		}
+
+		// create temporary directory
+		Path tempDir = Paths.get( tmpdir );
+		Files.createDirectories( tempDir );
+
+		// delete no longer needed temporary files (from already exited applications)
+		if( SystemInfo.isWindows )
+			deleteTemporaryFiles( tempDir );
+
+		return tempDir;
 	}
 
 	private static void deleteTemporaryFiles( Path tempDir ) {

@@ -40,6 +40,8 @@ import java.awt.event.ComponentEvent;
 import java.awt.event.ComponentListener;
 import java.awt.event.ContainerEvent;
 import java.awt.event.ContainerListener;
+import java.awt.event.FocusEvent;
+import java.awt.event.FocusListener;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
@@ -47,15 +49,19 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionListener;
 import java.awt.event.MouseWheelEvent;
+import java.awt.geom.AffineTransform;
+import java.awt.geom.Area;
 import java.awt.geom.Path2D;
 import java.awt.geom.Rectangle2D;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.Collections;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.IntConsumer;
+import java.util.function.Predicate;
 import javax.accessibility.Accessible;
 import javax.accessibility.AccessibleContext;
 import javax.swing.Action;
@@ -79,14 +85,22 @@ import javax.swing.event.ChangeListener;
 import javax.swing.event.PopupMenuEvent;
 import javax.swing.event.PopupMenuListener;
 import javax.swing.plaf.ComponentUI;
+import javax.swing.plaf.TabbedPaneUI;
 import javax.swing.plaf.UIResource;
 import javax.swing.plaf.basic.BasicTabbedPaneUI;
 import javax.swing.text.JTextComponent;
 import javax.swing.text.View;
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.icons.FlatTabbedPaneCloseIcon;
+import com.formdev.flatlaf.ui.FlatStylingSupport.Styleable;
+import com.formdev.flatlaf.ui.FlatStylingSupport.StyleableUI;
+import com.formdev.flatlaf.ui.FlatStylingSupport.UnknownStyleException;
 import com.formdev.flatlaf.util.Animator;
 import com.formdev.flatlaf.util.CubicBezierEasing;
+import com.formdev.flatlaf.util.HiDPIUtils;
 import com.formdev.flatlaf.util.JavaCompatibility;
+import com.formdev.flatlaf.util.LoggingFacade;
 import com.formdev.flatlaf.util.StringUtils;
 import com.formdev.flatlaf.util.UIScale;
 
@@ -101,7 +115,7 @@ import com.formdev.flatlaf.util.UIScale;
  * @uiDefault TabbedPane.font							Font
  * @uiDefault TabbedPane.background						Color
  * @uiDefault TabbedPane.foreground						Color
- * @uiDefault TabbedPane.shadow							Color	used for scroll arrows and cropped line
+ * @uiDefault TabbedPane.shadow							Color	used for cropped line
  * @uiDefault TabbedPane.textIconGap					int
  * @uiDefault TabbedPane.tabInsets						Insets
  * @uiDefault TabbedPane.selectedTabPadInsets			Insets	unused
@@ -117,23 +131,34 @@ import com.formdev.flatlaf.util.UIScale;
  *
  * @uiDefault TabbedPane.disabledForeground				Color
  * @uiDefault TabbedPane.selectedBackground				Color	optional
- * @uiDefault TabbedPane.selectedForeground				Color
+ * @uiDefault TabbedPane.selectedForeground				Color	optional
  * @uiDefault TabbedPane.underlineColor					Color
+ * @uiDefault TabbedPane.inactiveUnderlineColor			Color
  * @uiDefault TabbedPane.disabledUnderlineColor			Color
- * @uiDefault TabbedPane.hoverColor						Color
- * @uiDefault TabbedPane.focusColor						Color
+ * @uiDefault TabbedPane.hoverColor						Color	optional
+ * @uiDefault TabbedPane.hoverForeground				Color	optional
+ * @uiDefault TabbedPane.focusColor						Color	optional
+ * @uiDefault TabbedPane.focusForeground				Color	optional
  * @uiDefault TabbedPane.tabSeparatorColor				Color	optional; defaults to TabbedPane.contentAreaColor
  * @uiDefault TabbedPane.contentAreaColor				Color
  * @uiDefault TabbedPane.minimumTabWidth				int		optional
  * @uiDefault TabbedPane.maximumTabWidth				int		optional
  * @uiDefault TabbedPane.tabHeight						int
  * @uiDefault TabbedPane.tabSelectionHeight				int
+ * @uiDefault TabbedPane.cardTabSelectionHeight			int
+ * @uiDefault TabbedPane.tabArc							int
+ * @uiDefault TabbedPane.tabSelectionArc				int
+ * @uiDefault TabbedPane.cardTabArc						int
+ * @uiDefault TabbedPane.selectedInsets					Insets
+ * @uiDefault TabbedPane.tabSelectionInsets				Insets
  * @uiDefault TabbedPane.contentSeparatorHeight			int
  * @uiDefault TabbedPane.showTabSeparators				boolean
  * @uiDefault TabbedPane.tabSeparatorsFullHeight		boolean
  * @uiDefault TabbedPane.hasFullBorder					boolean
+ * @uiDefault TabbedPane.rotateTabRuns					boolean
  *
  * @uiDefault TabbedPane.tabLayoutPolicy				String	wrap (default) or scroll
+ * @uiDefault TabbedPane.tabType						String	underlined (default) or card
  * @uiDefault TabbedPane.tabsPopupPolicy				String	never or asNeeded (default)
  * @uiDefault TabbedPane.scrollButtonsPolicy			String	never, asNeeded or asNeededSingle (default)
  * @uiDefault TabbedPane.scrollButtonsPlacement			String	both (default) or trailing
@@ -141,6 +166,7 @@ import com.formdev.flatlaf.util.UIScale;
  * @uiDefault TabbedPane.tabAreaAlignment				String	leading (default), center, trailing or fill
  * @uiDefault TabbedPane.tabAlignment					String	leading, center (default) or trailing
  * @uiDefault TabbedPane.tabWidthMode					String	preferred (default), equal or compact
+ * @uiDefault TabbedPane.tabRotation					String	none (default), auto, left or right
  * @uiDefault ScrollPane.smoothScrolling				boolean
  * @uiDefault TabbedPane.closeIcon						Icon
  *
@@ -151,12 +177,18 @@ import com.formdev.flatlaf.util.UIScale;
  * @uiDefault TabbedPane.buttonPressedBackground		Color
  *
  * @uiDefault TabbedPane.moreTabsButtonToolTipText		String
+ * @uiDefault TabbedPane.tabCloseToolTipText			String
  *
  * @author Karl Tauber
  */
 public class FlatTabbedPaneUI
 	extends BasicTabbedPaneUI
+	implements StyleableUI, FlatTitlePane.TitleBarCaptionHitTest
 {
+	// tab type
+	/** @since 2 */ protected static final int TAB_TYPE_UNDERLINED = 0;
+	/** @since 2 */ protected static final int TAB_TYPE_CARD = 1;
+
 	// tabs popup policy / scroll arrows policy
 	protected static final int NEVER = 0;
 //	protected static final int ALWAYS = 1;
@@ -169,51 +201,75 @@ public class FlatTabbedPaneUI
 	// tab area alignment
 	protected static final int FILL = 100;
 
+	// tab width mode
 	protected static final int WIDTH_MODE_PREFERRED = 0;
 	protected static final int WIDTH_MODE_EQUAL = 1;
 	protected static final int WIDTH_MODE_COMPACT = 2;
+
+	// tab rotation
+	/** @since 3.3 */ protected static final int NONE = -1;
+	/** @since 3.3 */ protected static final int AUTO = -2;
 
 	private static Set<KeyStroke> focusForwardTraversalKeys;
 	private static Set<KeyStroke> focusBackwardTraversalKeys;
 
 	protected Color foreground;
-	protected Color disabledForeground;
-	protected Color selectedBackground;
-	protected Color selectedForeground;
-	protected Color underlineColor;
-	protected Color disabledUnderlineColor;
-	protected Color hoverColor;
-	protected Color focusColor;
-	protected Color tabSeparatorColor;
-	protected Color contentAreaColor;
+	@Styleable protected Color disabledForeground;
+	@Styleable protected Color selectedBackground;
+	@Styleable protected Color selectedForeground;
+	@Styleable protected Color underlineColor;
+	/** @since 2.2 */ @Styleable protected Color inactiveUnderlineColor;
+	@Styleable protected Color disabledUnderlineColor;
+	@Styleable protected Color hoverColor;
+	/** @since 3.1 */ @Styleable protected Color hoverForeground;
+	@Styleable protected Color focusColor;
+	/** @since 3.1 */ @Styleable protected Color focusForeground;
+	@Styleable protected Color tabSeparatorColor;
+	@Styleable protected Color contentAreaColor;
 
 	private int textIconGapUnscaled;
-	protected int minimumTabWidth;
-	protected int maximumTabWidth;
-	protected int tabHeight;
-	protected int tabSelectionHeight;
-	protected int contentSeparatorHeight;
-	protected boolean showTabSeparators;
-	protected boolean tabSeparatorsFullHeight;
-	protected boolean hasFullBorder;
-	protected boolean tabsOpaque = true;
+	@Styleable protected int minimumTabWidth;
+	@Styleable protected int maximumTabWidth;
+	@Styleable protected int tabHeight;
+	@Styleable protected int tabSelectionHeight;
+	/** @since 2 */ @Styleable protected int cardTabSelectionHeight;
+	/** @since 3.2 */ @Styleable protected int tabArc;
+	/** @since 3.2 */ @Styleable protected int tabSelectionArc;
+	/** @since 3.2 */ @Styleable protected int cardTabArc;
+	/** @since 3.2 */ @Styleable protected Insets selectedInsets;
+	/** @since 3.2 */ @Styleable protected Insets tabSelectionInsets;
+	@Styleable protected int contentSeparatorHeight;
+	@Styleable protected boolean showTabSeparators;
+	@Styleable protected boolean tabSeparatorsFullHeight;
+	@Styleable protected boolean hasFullBorder;
+	@Styleable protected boolean tabsOpaque = true;
+	/** @since 2.5 */ @Styleable protected boolean rotateTabRuns = true;
 
-	private int tabsPopupPolicy;
-	private int scrollButtonsPolicy;
-	private int scrollButtonsPlacement;
+	@Styleable(type=String.class) private int tabType;
+	@Styleable(type=String.class) private int tabsPopupPolicy;
+	@Styleable(type=String.class) private int scrollButtonsPolicy;
+	@Styleable(type=String.class) private int scrollButtonsPlacement;
 
-	private int tabAreaAlignment;
-	private int tabAlignment;
-	private int tabWidthMode;
+	@Styleable(type=String.class) private int tabAreaAlignment;
+	@Styleable(type=String.class) private int tabAlignment;
+	@Styleable(type=String.class) private int tabWidthMode;
+	/** @since 3.3 */ @Styleable(type=String.class) private int tabRotation;
 	protected Icon closeIcon;
 
-	protected String arrowType;
-	protected Insets buttonInsets;
-	protected int buttonArc;
-	protected Color buttonHoverBackground;
-	protected Color buttonPressedBackground;
+	@Styleable protected String arrowType;
+	@Styleable protected Insets buttonInsets;
+	@Styleable protected int buttonArc;
+	@Styleable protected Color buttonHoverBackground;
+	@Styleable protected Color buttonPressedBackground;
 
-	protected String moreTabsButtonToolTipText;
+	@Styleable protected String moreTabsButtonToolTipText;
+	/** @since 2 */ @Styleable protected String tabCloseToolTipText;
+
+	// only used via styling (not in UI defaults, but has likewise client properties)
+	/** @since 2 */ @Styleable protected boolean showContentSeparator = true;
+	/** @since 2 */ @Styleable protected boolean hideTabAreaWithOneTab;
+	/** @since 2 */ @Styleable protected boolean tabClosable;
+	/** @since 2 */ @Styleable protected int tabIconPlacement = LEADING;
 
 	protected JViewport tabViewport;
 	protected FlatWheelTabScroller wheelTabScroller;
@@ -229,8 +285,11 @@ public class FlatTabbedPaneUI
 	private boolean blockRollover;
 	private boolean rolloverTabClose;
 	private boolean pressedTabClose;
+	private boolean inBasicLayoutContainer;
 
 	private Object[] oldRenderingHints;
+	private Map<String, Object> oldStyleValues;
+	private boolean closeIconShared = true;
 
 	public static ComponentUI createUI( JComponent c ) {
 		return new FlatTabbedPaneUI();
@@ -259,6 +318,9 @@ public class FlatTabbedPaneUI
 		buttonPressedBackground = UIManager.getColor( "TabbedPane.buttonPressedBackground" );
 
 		super.installUI( c );
+
+		FlatSelectedTabRepainter.install();
+		installStyle();
 	}
 
 	@Override
@@ -288,9 +350,12 @@ public class FlatTabbedPaneUI
 		selectedBackground = UIManager.getColor( "TabbedPane.selectedBackground" );
 		selectedForeground = UIManager.getColor( "TabbedPane.selectedForeground" );
 		underlineColor = UIManager.getColor( "TabbedPane.underlineColor" );
+		inactiveUnderlineColor = FlatUIUtils.getUIColor( "TabbedPane.inactiveUnderlineColor", underlineColor );
 		disabledUnderlineColor = UIManager.getColor( "TabbedPane.disabledUnderlineColor" );
 		hoverColor = UIManager.getColor( "TabbedPane.hoverColor" );
+		hoverForeground = UIManager.getColor( "TabbedPane.hoverForeground" );
 		focusColor = UIManager.getColor( "TabbedPane.focusColor" );
+		focusForeground = UIManager.getColor( "TabbedPane.focusForeground" );
 		tabSeparatorColor = UIManager.getColor( "TabbedPane.tabSeparatorColor" );
 		contentAreaColor = UIManager.getColor( "TabbedPane.contentAreaColor" );
 
@@ -299,12 +364,20 @@ public class FlatTabbedPaneUI
 		maximumTabWidth = UIManager.getInt( "TabbedPane.maximumTabWidth" );
 		tabHeight = UIManager.getInt( "TabbedPane.tabHeight" );
 		tabSelectionHeight = UIManager.getInt( "TabbedPane.tabSelectionHeight" );
+		cardTabSelectionHeight = UIManager.getInt( "TabbedPane.cardTabSelectionHeight" );
+		tabArc = UIManager.getInt( "TabbedPane.tabArc" );
+		tabSelectionArc = UIManager.getInt( "TabbedPane.tabSelectionArc" );
+		cardTabArc = UIManager.getInt( "TabbedPane.cardTabArc" );
+		selectedInsets = UIManager.getInsets( "TabbedPane.selectedInsets" );
+		tabSelectionInsets = UIManager.getInsets( "TabbedPane.tabSelectionInsets" );
 		contentSeparatorHeight = UIManager.getInt( "TabbedPane.contentSeparatorHeight" );
 		showTabSeparators = UIManager.getBoolean( "TabbedPane.showTabSeparators" );
 		tabSeparatorsFullHeight = UIManager.getBoolean( "TabbedPane.tabSeparatorsFullHeight" );
 		hasFullBorder = UIManager.getBoolean( "TabbedPane.hasFullBorder" );
 		tabsOpaque = UIManager.getBoolean( "TabbedPane.tabsOpaque" );
+		rotateTabRuns = FlatUIUtils.getUIBoolean( "TabbedPane.rotateTabRuns", true );
 
+		tabType = parseTabType( UIManager.getString( "TabbedPane.tabType" ) );
 		tabsPopupPolicy = parseTabsPopupPolicy( UIManager.getString( "TabbedPane.tabsPopupPolicy" ) );
 		scrollButtonsPolicy = parseScrollButtonsPolicy( UIManager.getString( "TabbedPane.scrollButtonsPolicy" ) );
 		scrollButtonsPlacement = parseScrollButtonsPlacement( UIManager.getString( "TabbedPane.scrollButtonsPlacement" ) );
@@ -312,13 +385,16 @@ public class FlatTabbedPaneUI
 		tabAreaAlignment = parseAlignment( UIManager.getString( "TabbedPane.tabAreaAlignment" ), LEADING );
 		tabAlignment = parseAlignment( UIManager.getString( "TabbedPane.tabAlignment" ), CENTER );
 		tabWidthMode = parseTabWidthMode( UIManager.getString( "TabbedPane.tabWidthMode" ) );
+		tabRotation = parseTabRotation( UIManager.getString( "TabbedPane.tabRotation" ) );
 		closeIcon = UIManager.getIcon( "TabbedPane.closeIcon" );
+		closeIconShared = true;
 
 		buttonInsets = UIManager.getInsets( "TabbedPane.buttonInsets" );
 		buttonArc = UIManager.getInt( "TabbedPane.buttonArc" );
 
 		Locale l = tabPane.getLocale();
 		moreTabsButtonToolTipText = UIManager.getString( "TabbedPane.moreTabsButtonToolTipText", l );
+		tabCloseToolTipText = UIManager.getString( "TabbedPane.tabCloseToolTipText", l );
 
 		// scale
 		textIconGap = scale( textIconGapUnscaled );
@@ -351,15 +427,20 @@ public class FlatTabbedPaneUI
 		selectedBackground = null;
 		selectedForeground = null;
 		underlineColor = null;
+		inactiveUnderlineColor = null;
 		disabledUnderlineColor = null;
 		hoverColor = null;
+		hoverForeground = null;
 		focusColor = null;
+		focusForeground = null;
 		tabSeparatorColor = null;
 		contentAreaColor = null;
 		closeIcon = null;
 
 		buttonHoverBackground = null;
 		buttonPressedBackground = null;
+
+		oldStyleValues = null;
 
 		MigLayoutVisualPadding.uninstall( tabPane );
 	}
@@ -404,7 +485,7 @@ public class FlatTabbedPaneUI
 
 		// At this point, BasicTabbedPaneUI already has installed
 		// TabbedPaneScrollLayout (in super.createLayoutManager()) and
-		// ScrollableTabSupport, ScrollableTabViewport, ScrollableTabPanel, etc
+		// ScrollableTabSupport, ScrollableTabViewport, ScrollableTabPanel, etc.
 		// (in super.installComponents()).
 
 		// install own layout manager that delegates to original layout manager
@@ -538,6 +619,13 @@ public class FlatTabbedPaneUI
 	}
 
 	@Override
+	protected FocusListener createFocusListener() {
+		Handler handler = getHandler();
+		handler.focusDelegate = super.createFocusListener();
+		return handler;
+	}
+
+	@Override
 	protected LayoutManager createLayoutManager() {
 		if( tabPane.getTabLayoutPolicy() == JTabbedPane.WRAP_TAB_LAYOUT )
 			return new FlatTabbedPaneLayout();
@@ -558,6 +646,164 @@ public class FlatTabbedPaneUI
 		return new FlatScrollableTabButton( direction );
 	}
 
+	/** @since 2 */
+	protected void installStyle() {
+		try {
+			applyStyle( FlatStylingSupport.getResolvedStyle( tabPane, "TabbedPane" ) );
+		} catch( RuntimeException ex ) {
+			LoggingFacade.INSTANCE.logSevere( null, ex );
+		}
+	}
+
+	/** @since 2 */
+	protected void applyStyle( Object style ) {
+		oldStyleValues = FlatStylingSupport.parseAndApply( oldStyleValues, style, this::applyStyleProperty );
+
+		// update buttons
+		for( Component c : tabPane.getComponents() ) {
+			if( c instanceof FlatTabAreaButton )
+				((FlatTabAreaButton)c).updateStyle();
+		}
+	}
+
+	/** @since 2 */
+	protected Object applyStyleProperty( String key, Object value ) {
+		// close icon
+		if( key.startsWith( "close" ) ) {
+			if( !(closeIcon instanceof FlatTabbedPaneCloseIcon) )
+				return new UnknownStyleException( key );
+
+			if( closeIconShared ) {
+				closeIcon = FlatStylingSupport.cloneIcon( closeIcon );
+				closeIconShared = false;
+			}
+
+			return ((FlatTabbedPaneCloseIcon)closeIcon).applyStyleProperty( key, value );
+		}
+
+		if( value instanceof String ) {
+			switch( key ) {
+				case "tabType": value = parseTabType( (String) value ); break;
+				case "tabsPopupPolicy": value = parseTabsPopupPolicy( (String) value ); break;
+				case "scrollButtonsPolicy": value = parseScrollButtonsPolicy( (String) value ); break;
+				case "scrollButtonsPlacement": value = parseScrollButtonsPlacement( (String) value ); break;
+
+				case "tabAreaAlignment": value = parseAlignment( (String) value, LEADING ); break;
+				case "tabAlignment": value = parseAlignment( (String) value, CENTER ); break;
+				case "tabWidthMode": value = parseTabWidthMode( (String) value ); break;
+				case "tabRotation": value = parseTabRotation( (String) value ); break;
+
+				case "tabIconPlacement": value = parseTabIconPlacement( (String) value ); break;
+			}
+		} else {
+			Object oldValue;
+			switch( key ) {
+				// BasicTabbedPaneUI
+				case "tabInsets": oldValue = tabInsets; tabInsets = (Insets) value; return oldValue;
+				case "tabAreaInsets": oldValue = tabAreaInsets; tabAreaInsets = (Insets) value; return oldValue;
+				case "textIconGap":
+					oldValue = textIconGapUnscaled;
+					textIconGapUnscaled = (int) value;
+					textIconGap = scale( textIconGapUnscaled );
+					return oldValue;
+			}
+		}
+
+		return FlatStylingSupport.applyToAnnotatedObjectOrComponent( this, tabPane, key, value );
+	}
+
+	/** @since 2 */
+	@Override
+	public Map<String, Class<?>> getStyleableInfos( JComponent c ) {
+		Map<String, Class<?>> infos = new FlatStylingSupport.StyleableInfosMap<>();
+		infos.put( "tabInsets", Insets.class );
+		infos.put( "tabAreaInsets", Insets.class );
+		infos.put( "textIconGap", int.class );
+		FlatStylingSupport.collectAnnotatedStyleableInfos( this, infos );
+		if( closeIcon instanceof FlatTabbedPaneCloseIcon )
+			infos.putAll( ((FlatTabbedPaneCloseIcon)closeIcon).getStyleableInfos() );
+		return infos;
+	}
+
+	/** @since 2.5 */
+	@Override
+	public Object getStyleableValue( JComponent c, String key ) {
+		// close icon
+		if( key.startsWith( "close" ) ) {
+			return (closeIcon instanceof FlatTabbedPaneCloseIcon)
+				? ((FlatTabbedPaneCloseIcon)closeIcon).getStyleableValue( key )
+				: null;
+		}
+
+		switch( key ) {
+			// BasicTabbedPaneUI
+			case "tabInsets":		return tabInsets;
+			case "tabAreaInsets":	return tabAreaInsets;
+			case "textIconGap":		return textIconGapUnscaled;
+
+			// FlatTabbedPaneUI
+			case "tabType":
+				switch( tabType ) {
+					default:
+					case TAB_TYPE_UNDERLINED:	return TABBED_PANE_TAB_TYPE_UNDERLINED;
+					case TAB_TYPE_CARD:			return TABBED_PANE_TAB_TYPE_CARD;
+				}
+
+			case "tabsPopupPolicy":
+				switch( tabsPopupPolicy ) {
+					default:
+					case AS_NEEDED:				return TABBED_PANE_POLICY_AS_NEEDED;
+					case NEVER:					return TABBED_PANE_POLICY_NEVER;
+				}
+
+			case "scrollButtonsPolicy":
+				switch( scrollButtonsPolicy ) {
+					default:
+					case AS_NEEDED_SINGLE:		return TABBED_PANE_POLICY_AS_NEEDED_SINGLE;
+					case AS_NEEDED:				return TABBED_PANE_POLICY_AS_NEEDED;
+					case NEVER:					return TABBED_PANE_POLICY_NEVER;
+				}
+
+			case "scrollButtonsPlacement":
+				switch( scrollButtonsPlacement ) {
+					default:
+					case BOTH:					return TABBED_PANE_PLACEMENT_BOTH;
+					case TRAILING:				return TABBED_PANE_PLACEMENT_TRAILING;
+				}
+
+			case "tabAreaAlignment":	return alignmentToString( tabAreaAlignment, TABBED_PANE_ALIGN_LEADING );
+			case "tabAlignment":			return alignmentToString( tabAlignment, TABBED_PANE_ALIGN_CENTER );
+
+			case "tabWidthMode":
+				switch( tabWidthMode ) {
+					default:
+					case WIDTH_MODE_PREFERRED:	return TABBED_PANE_TAB_WIDTH_MODE_PREFERRED;
+					case WIDTH_MODE_EQUAL:		return TABBED_PANE_TAB_WIDTH_MODE_EQUAL;
+					case WIDTH_MODE_COMPACT:	return TABBED_PANE_TAB_WIDTH_MODE_COMPACT;
+				}
+
+			case "tabRotation":
+				switch( tabRotation ) {
+					default:
+					case NONE:					return TABBED_PANE_TAB_ROTATION_NONE;
+					case AUTO:					return TABBED_PANE_TAB_ROTATION_AUTO;
+					case LEFT:					return TABBED_PANE_TAB_ROTATION_LEFT;
+					case RIGHT:					return TABBED_PANE_TAB_ROTATION_RIGHT;
+				}
+
+			case "tabIconPlacement":
+				switch( tabIconPlacement ) {
+					default:
+					case LEADING:				return "leading";
+					case TRAILING:				return "trailing";
+					case TOP:					return "top";
+					case BOTTOM:				return "bottom";
+				}
+		}
+
+		return FlatStylingSupport.getAnnotatedStyleableValue( this, key );
+	}
+
 	protected void setRolloverTab( int x, int y ) {
 		setRolloverTab( tabForCoordinate( tabPane, x, y ) );
 	}
@@ -570,12 +816,38 @@ public class FlatTabbedPaneUI
 		int oldIndex = getRolloverTab();
 		super.setRolloverTab( index );
 
-		if( index == oldIndex )
-			return;
+		if( index != oldIndex )
+			repaintRolloverLaterOnce( oldIndex );
+	}
 
-		// repaint old and new hover tabs
-		repaintTab( oldIndex );
-		repaintTab( index );
+	private boolean repaintRolloverPending;
+
+	/**
+	 * Repaint rollover tab, but deferred and only once.
+	 * This is to avoid unnecessary repaints in case of temporary changes to rollover tab.
+	 *
+	 * E.g. when moving mouse over a single tab, a re-layout may occur and
+	 * set rollover tab to -1, in BasicTabbedPaneUI.TabbedPaneLayout.layoutContainer() and
+	 * BasicTabbedPaneUI.TabbedPaneScrollLayout.layoutContainer(), and subsequently
+	 * change rollover tab back to previous value.
+	 */
+	private void repaintRolloverLaterOnce( int oldIndex ) {
+		if( repaintRolloverPending )
+			return;
+		repaintRolloverPending = true;
+
+		EventQueue.invokeLater( () -> {
+			repaintRolloverPending = false;
+			if( tabPane == null )
+				return;
+
+			int index = getRolloverTab();
+			if( index != oldIndex ) {
+				// repaint old and new hover tabs
+				repaintTab( oldIndex );
+				repaintTab( index );
+			}
+		} );
 	}
 
 	protected boolean isRolloverTabClose() {
@@ -607,19 +879,43 @@ public class FlatTabbedPaneUI
 			return;
 
 		Rectangle r = getTabBounds( tabPane, tabIndex );
-		if( r != null )
-			tabPane.repaint( r );
+		if( r == null )
+			return;
+
+		// increase size of repaint region to include part of content border
+		if( contentSeparatorHeight > 0 &&
+			clientPropertyBoolean( tabPane, TABBED_PANE_SHOW_CONTENT_SEPARATOR, true ) )
+		{
+			int sh = scale( contentSeparatorHeight );
+			switch( tabPane.getTabPlacement() ) {
+				default:
+				case TOP:    r.height += sh; break;
+				case BOTTOM: r.height += sh; r.y -= sh; break;
+				case LEFT:   r.width  += sh; break;
+				case RIGHT:  r.width  += sh; r.x -= sh; break;
+			}
+		}
+
+		HiDPIUtils.repaint( tabPane, r );
 	}
 
 	private boolean inCalculateEqual;
 
 	@Override
 	protected int calculateTabWidth( int tabPlacement, int tabIndex, FontMetrics metrics ) {
+		return (getRealTabRotation( tabPlacement ) == NONE)
+			? calculateTabWidthImpl( tabPlacement, tabIndex, metrics, false )
+			: calculateTabHeightImpl( tabPlacement, tabIndex, metrics.getHeight(), true );
+	}
+
+	private int calculateTabWidthImpl( int tabPlacement, int tabIndex, FontMetrics metrics, boolean rotated ) {
 		int tabWidthMode = getTabWidthMode();
-		if( tabWidthMode == WIDTH_MODE_EQUAL && isHorizontalTabPlacement() && !inCalculateEqual ) {
+		if( tabWidthMode == WIDTH_MODE_EQUAL && isHorizontalOrRotated( tabPlacement ) && !inCalculateEqual ) {
 			inCalculateEqual = true;
 			try {
-				return calculateMaxTabWidth( tabPlacement );
+				return isHorizontalTabPlacement( tabPlacement )
+					? calculateMaxTabWidth( tabPlacement )
+					: calculateMaxTabHeight( tabPlacement );
 			} finally {
 				inCalculateEqual = false;
 			}
@@ -632,14 +928,14 @@ public class FlatTabbedPaneUI
 		Icon icon;
 		if( tabWidthMode == WIDTH_MODE_COMPACT &&
 			tabIndex != tabPane.getSelectedIndex() &&
-			isHorizontalTabPlacement() &&
+			isHorizontalOrRotated( tabPlacement ) &&
 			tabPane.getTabComponentAt( tabIndex ) == null &&
 			(icon = getIconForTab( tabIndex )) != null )
 		{
 			Insets tabInsets = getTabInsets( tabPlacement, tabIndex );
 			tabWidth = icon.getIconWidth() + tabInsets.left + tabInsets.right;
 		} else {
-			int iconPlacement = clientPropertyInt( tabPane, TABBED_PANE_TAB_ICON_PLACEMENT, LEADING );
+			int iconPlacement = clientPropertyInt( tabPane, TABBED_PANE_TAB_ICON_PLACEMENT, tabIconPlacement );
 			if( (iconPlacement == TOP || iconPlacement == BOTTOM) &&
 				tabPane.getTabComponentAt( tabIndex ) == null &&
 				(icon = getIconForTab( tabIndex )) != null )
@@ -658,8 +954,16 @@ public class FlatTabbedPaneUI
 
 				Insets tabInsets = getTabInsets( tabPlacement, tabIndex );
 				tabWidth += tabInsets.left + tabInsets.right;
-			} else
+			} else {
 				tabWidth = super.calculateTabWidth( tabPlacement, tabIndex, metrics ) - 3 /* was added by superclass */;
+
+				// tab components are not rotated
+				Component tabComponent;
+				if( rotated && (tabComponent = tabPane.getTabComponentAt( tabIndex )) != null ) {
+					Dimension prefSize = tabComponent.getPreferredSize();
+					tabWidth = tabWidth - prefSize.width + prefSize.height;
+				}
+			}
 		}
 
 		// make tab wider if closable
@@ -679,10 +983,16 @@ public class FlatTabbedPaneUI
 
 	@Override
 	protected int calculateTabHeight( int tabPlacement, int tabIndex, int fontHeight ) {
+		return (getRealTabRotation( tabPlacement ) == NONE)
+			? calculateTabHeightImpl( tabPlacement, tabIndex, fontHeight, false )
+			: calculateTabWidthImpl( tabPlacement, tabIndex, getFontMetrics(), true );
+	}
+
+	private int calculateTabHeightImpl( int tabPlacement, int tabIndex, int fontHeight, boolean rotated ) {
 		int tabHeight;
 
 		Icon icon;
-		int iconPlacement = clientPropertyInt( tabPane, TABBED_PANE_TAB_ICON_PLACEMENT, LEADING );
+		int iconPlacement = clientPropertyInt( tabPane, TABBED_PANE_TAB_ICON_PLACEMENT, tabIconPlacement );
 		if( (iconPlacement == TOP || iconPlacement == BOTTOM) &&
 			tabPane.getTabComponentAt( tabIndex ) == null &&
 			(icon = getIconForTab( tabIndex )) != null )
@@ -698,8 +1008,16 @@ public class FlatTabbedPaneUI
 
 			Insets tabInsets = getTabInsets( tabPlacement, tabIndex );
 			tabHeight += tabInsets.top + tabInsets.bottom;
-		} else
+		} else {
 			tabHeight = super.calculateTabHeight( tabPlacement, tabIndex, fontHeight ) - 2 /* was added by superclass */;
+
+			// tab components are not rotated
+			Component tabComponent;
+			if( rotated && (tabComponent = tabPane.getTabComponentAt( tabIndex )) != null ) {
+				Dimension prefSize = tabComponent.getPreferredSize();
+				tabHeight = tabHeight - prefSize.height + prefSize.width;
+			}
+		}
 
 		return Math.max( tabHeight, scale( clientPropertyInt( tabPane, TABBED_PANE_TAB_HEIGHT, this.tabHeight ) ) );
 	}
@@ -730,6 +1048,16 @@ public class FlatTabbedPaneUI
 		return scale( (value instanceof Insets)
 			? (Insets) value
 			: super.getTabInsets( tabPlacement, tabIndex ) );
+	}
+
+	/** @since 3.3 */
+	protected Insets getTabInsetsRotated( int tabPlacement, int tabIndex, int rotation ) {
+		Insets insets = getTabInsets( tabPlacement, tabIndex );
+		switch( rotation ) {
+			case LEFT:	return new Insets( insets.right, insets.top, insets.left, insets.bottom );
+			case RIGHT:	return new Insets( insets.left, insets.bottom, insets.right, insets.top );
+			default:	return insets;
+		}
 	}
 
 	@Override
@@ -771,7 +1099,7 @@ public class FlatTabbedPaneUI
 
 		// increase insets for wrap layout if using leading/trailing components
 		if( tabPane.getTabLayoutPolicy() == JTabbedPane.WRAP_TAB_LAYOUT ) {
-			if( isHorizontalTabPlacement() ) {
+			if( isHorizontalTabPlacement( tabPlacement ) ) {
 				insets.left += getLeadingPreferredWidth();
 				insets.right += getTrailingPreferredWidth();
 			} else {
@@ -790,7 +1118,7 @@ public class FlatTabbedPaneUI
 	 */
 	@Override
 	protected Insets getContentBorderInsets( int tabPlacement ) {
-		if( hideTabArea() || contentSeparatorHeight == 0 || !clientPropertyBoolean( tabPane, TABBED_PANE_SHOW_CONTENT_SEPARATOR, true ) )
+		if( hideTabArea() || contentSeparatorHeight == 0 || !clientPropertyBoolean( tabPane, TABBED_PANE_SHOW_CONTENT_SEPARATOR, showContentSeparator ) )
 			return new Insets( 0, 0, 0, 0 );
 
 		boolean hasFullBorder = clientPropertyBoolean( tabPane, TABBED_PANE_HAS_FULL_BORDER, this.hasFullBorder );
@@ -804,7 +1132,7 @@ public class FlatTabbedPaneUI
 
 	@Override
 	protected int getTabLabelShiftX( int tabPlacement, int tabIndex, boolean isSelected ) {
-		if( isTabClosable( tabIndex ) ) {
+		if( isTabClosable( tabIndex ) && getRealTabRotation( tabPlacement ) == NONE ) {
 			int shift = closeIcon.getIconWidth() / 2;
 			return isLeftToRight() ? -shift : shift;
 		}
@@ -813,6 +1141,10 @@ public class FlatTabbedPaneUI
 
 	@Override
 	protected int getTabLabelShiftY( int tabPlacement, int tabIndex, boolean isSelected ) {
+		if( isTabClosable( tabIndex ) && getRealTabRotation( tabPlacement ) != NONE ) {
+			int shift = closeIcon.getIconHeight() / 2;
+			return isLeftToRight() ? shift : -shift;
+		}
 		return 0;
 	}
 
@@ -838,8 +1170,46 @@ public class FlatTabbedPaneUI
 
 		paintContentBorder( g, tabPlacement, selectedIndex );
 
+		// fill tabs area background
+		// - for rounded cards use partly rounded rectangle
+		if( tabsOpaque && !tabPane.isOpaque() && tabPane.getTabCount() > 0 ) {
+			Rectangle tr = null;
+			if( isScrollTabLayout() ) {
+				// scroll layout: use tab viewport bounds and add visible buttons
+				tr = tabViewport.getBounds();
+				for( Component child : tabPane.getComponents() ) {
+					if( child instanceof FlatTabAreaButton && child.isVisible() )
+						tr = tr.union( child.getBounds() );
+				}
+			} else {
+				// wrap layout: use union of all tab rectangles
+				for( Rectangle r : rects )
+					tr = (tr != null) ? tr.union( r ) : r;
+			}
+
+			if( tr != null ) {
+				g.setColor( tabPane.getBackground() );
+
+				if( (getTabType() == TAB_TYPE_CARD) && cardTabArc > 0 ) {
+					((Graphics2D)g).fill( createCardTabOuterPath( tabPlacement, tr.x, tr.y, tr.width, tr.height ) );
+				} else
+					g.fillRect( tr.x, tr.y, tr.width, tr.height );
+			}
+		}
+
 		if( !isScrollTabLayout() )
 			paintTabArea( g, tabPlacement, selectedIndex );
+	}
+
+	@Override
+	protected void paintTabArea( Graphics g, int tabPlacement, int selectedIndex ) {
+		// need to set rendering hints here too because this method is also invoked
+		// from BasicTabbedPaneUI.ScrollableTabPanel.paintComponent()
+		Object[] oldHints = FlatUIUtils.setRenderingHints( g );
+
+		super.paintTabArea( g, tabPlacement, selectedIndex );
+
+		FlatUIUtils.resetRenderingHints( g, oldHints );
 	}
 
 	@Override
@@ -866,7 +1236,7 @@ public class FlatTabbedPaneUI
 
 		// paint selection indicator
 		if( isSelected )
-			paintTabSelection( g, tabPlacement, x, y, w, h );
+			paintTabSelection( g, tabPlacement, tabIndex, x, y, w, h );
 
 		if( tabPane.getTabComponentAt( tabIndex ) != null )
 			return;
@@ -876,10 +1246,30 @@ public class FlatTabbedPaneUI
 		Icon icon = getIconForTab( tabIndex );
 		Font font = tabPane.getFont();
 		FontMetrics metrics = tabPane.getFontMetrics( font );
-		boolean isCompact = (icon != null && !isSelected && getTabWidthMode() == WIDTH_MODE_COMPACT && isHorizontalTabPlacement());
+		boolean isCompact = (icon != null && !isSelected && getTabWidthMode() == WIDTH_MODE_COMPACT && isHorizontalOrRotated( tabPlacement ));
 		if( isCompact )
 			title = null;
 		String clippedTitle = layoutAndClipLabel( tabPlacement, metrics, tabIndex, title, icon, tabRect, iconRect, textRect, isSelected );
+
+/*debug
+		g.setColor( Color.red );
+		g.drawRect( tabRect.x, tabRect.y, tabRect.width - 1, tabRect.height - 1 );
+		g.setColor( Color.green );
+		Rectangle tabRect2 = FlatUIUtils.subtractInsets( tabRect, getTabInsetsRotated( tabPlacement, tabIndex, getRealTabRotation( tabPlacement ) ) );
+		g.drawRect( tabRect2.x, tabRect2.y, tabRect2.width - 1, tabRect2.height - 1 );
+		g.setColor( Color.blue );
+		g.drawRect( iconRect.x, iconRect.y, iconRect.width - 1, iconRect.height - 1 );
+		g.setColor( Color.magenta );
+		g.drawRect( textRect.x, textRect.y, textRect.width - 1, textRect.height - 1 );
+		g.setColor( Color.orange );
+		Rectangle closeHitArea = getTabCloseHitArea( tabIndex );
+		if( moreTabsButton != null ) {
+			Point viewPosition = tabViewport.getViewPosition();
+			closeHitArea.x -= tabViewport.getX() - viewPosition.x;
+			closeHitArea.y -= tabViewport.getY() - viewPosition.y;
+		}
+		g.drawRect( closeHitArea.x, closeHitArea.y, closeHitArea.width - 1, closeHitArea.height - 1 );
+debug*/
 
 		// special title clipping for scroll layout where title of last visible tab on right side may be truncated
 		if( tabViewport != null && (tabPlacement == TOP || tabPlacement == BOTTOM) ) {
@@ -908,42 +1298,148 @@ public class FlatTabbedPaneUI
 			// html
 			View view = getTextViewForTab( tabIndex );
 			if( view != null ) {
-				view.paint( g, textRect );
+				AffineTransform oldTransform = rotateGraphics( g, tabPlacement, textRect );
+				Rectangle textRect2 = (oldTransform != null)
+					? new Rectangle( textRect.x, textRect.y, textRect.height, textRect.width )
+					: textRect;
+
+				view.paint( g, textRect2 );
+
+				if( oldTransform != null )
+					((Graphics2D)g).setTransform( oldTransform );
 				return;
 			}
 
+			// rotate text if necessary
+			AffineTransform oldTransform = rotateGraphics( g, tabPlacement, textRect );
+
 			// plain text
-			Color color;
-			if( tabPane.isEnabled() && tabPane.isEnabledAt( tabIndex ) ) {
-				color = tabPane.getForegroundAt( tabIndex );
-				if( isSelected && selectedForeground != null && color == tabPane.getForeground() )
-					color = selectedForeground;
-			} else
-				color = disabledForeground;
-
 			int mnemIndex = FlatLaf.isShowMnemonics() ? tabPane.getDisplayedMnemonicIndexAt( tabIndex ) : -1;
-
-			g.setColor( color );
+			g.setColor( getTabForeground( tabPlacement, tabIndex, isSelected ) );
 			FlatUIUtils.drawStringUnderlineCharAt( tabPane, g, title, mnemIndex,
 				textRect.x, textRect.y + metrics.getAscent() );
+
+			if( oldTransform != null )
+				((Graphics2D)g).setTransform( oldTransform );
 		} );
+	}
+
+	@Override
+	protected void paintIcon( Graphics g, int tabPlacement, int tabIndex, Icon icon, Rectangle iconRect, boolean isSelected ) {
+		if( icon == null )
+			return;
+
+		// clip icon painting (also done in JDK since Java 10)
+		Shape oldClip = g.getClip();
+		((Graphics2D)g).clip( iconRect );
+
+		// rotate icon if necessary
+		AffineTransform oldTransform = rotateGraphics( g, tabPlacement, iconRect );
+
+		// paint icon
+		icon.paintIcon( tabPane, g, iconRect.x, iconRect.y );
+
+		if( oldTransform != null )
+			((Graphics2D)g).setTransform( oldTransform );
+		g.setClip( oldClip );
+	}
+
+	private AffineTransform rotateGraphics( Graphics g, int tabPlacement, Rectangle r ) {
+		Graphics2D g2 = (Graphics2D) g;
+		AffineTransform oldTransform = null;
+
+		int rotation = getRealTabRotation( tabPlacement );
+		if( rotation == LEFT ) {
+			oldTransform = g2.getTransform();
+			g2.translate( 0, r.height );
+			g2.rotate( Math.toRadians( 270 ), r.x, r.y );
+		} else if( rotation == RIGHT ) {
+			oldTransform = g2.getTransform();
+			g2.translate( r.width, 0 );
+			g2.rotate( Math.toRadians( 90 ), r.x, r.y );
+		}
+
+		return oldTransform;
+	}
+
+	/** @since 3.1 */
+	protected Color getTabForeground( int tabPlacement, int tabIndex, boolean isSelected ) {
+		// tabbed pane or tab is disabled
+		if( !tabPane.isEnabled() || !tabPane.isEnabledAt( tabIndex ) )
+			return disabledForeground;
+
+		// hover
+		if( hoverForeground != null && getRolloverTab() == tabIndex )
+			return hoverForeground;
+
+		// tab foreground (if set)
+		Color foreground = tabPane.getForegroundAt( tabIndex );
+		if( foreground != tabPane.getForeground() )
+			return foreground;
+
+		// focused and selected
+		if( focusForeground != null && isSelected && FlatUIUtils.isPermanentFocusOwner( tabPane ) )
+			return focusForeground;
+		if( selectedForeground != null && isSelected )
+			return selectedForeground;
+
+		return foreground;
 	}
 
 	@Override
 	protected void paintTabBackground( Graphics g, int tabPlacement, int tabIndex,
 		int x, int y, int w, int h, boolean isSelected )
 	{
+		boolean isCard = (getTabType() == TAB_TYPE_CARD);
+
+		// apply insets
+		if( !isCard && selectedInsets != null ) {
+			Insets insets = new Insets( 0, 0, 0, 0 );
+			rotateInsets( selectedInsets, insets, tabPane.getTabPlacement() );
+
+			x += scale( insets.left );
+			y += scale( insets.top );
+			w -= scale( insets.left + insets.right );
+			h -= scale( insets.top + insets.bottom );
+		}
+
 		// paint tab background
-		boolean enabled = tabPane.isEnabled();
-		Color background = enabled && tabPane.isEnabledAt( tabIndex ) && getRolloverTab() == tabIndex
-			? hoverColor
-			: (enabled && isSelected && FlatUIUtils.isPermanentFocusOwner( tabPane )
-				? focusColor
-				: (selectedBackground != null && enabled && isSelected
-					? selectedBackground
-					: tabPane.getBackgroundAt( tabIndex )));
-		g.setColor( FlatUIUtils.deriveColor( background, tabPane.getBackground() ) );
-		g.fillRect( x, y, w, h );
+		Color background = getTabBackground( tabPlacement, tabIndex, isSelected );
+		if( background != tabPane.getBackground() ) {
+			g.setColor( FlatUIUtils.deriveColor( background, tabPane.getBackground() ) );
+			if( !isCard && tabArc > 0 ) {
+				float arc = scale( (float) tabArc ) / 2f;
+				FlatUIUtils.paintSelection( (Graphics2D) g, x, y, w, h, null, arc, arc, arc, arc, 0 );
+			} else if( isCard && cardTabArc > 0 )
+				((Graphics2D)g).fill( createCardTabOuterPath( tabPlacement, x, y, w, h ) );
+			else
+				g.fillRect( x, y, w, h );
+		}
+	}
+
+	/** @since 2 */
+	protected Color getTabBackground( int tabPlacement, int tabIndex, boolean isSelected ) {
+		Color background = tabPane.getBackgroundAt( tabIndex );
+
+		// tabbed pane or tab is disabled
+		if( !tabPane.isEnabled() || !tabPane.isEnabledAt( tabIndex ) )
+			return background;
+
+		// hover
+		if( hoverColor != null && getRolloverTab() == tabIndex )
+			return hoverColor;
+
+		// tab background (if set)
+		if( background != tabPane.getBackground() )
+			return background;
+
+		// focused and selected
+		if( focusColor != null && isSelected && FlatUIUtils.isPermanentFocusOwner( tabPane ) )
+			return focusColor;
+		if( selectedBackground != null && isSelected )
+			return selectedBackground;
+
+		return background;
 	}
 
 	@Override
@@ -953,7 +1449,58 @@ public class FlatTabbedPaneUI
 		// paint tab separators
 		if( clientPropertyBoolean( tabPane, TABBED_PANE_SHOW_TAB_SEPARATORS, showTabSeparators ) &&
 			!isLastInRun( tabIndex ) )
-		  paintTabSeparator( g, tabPlacement, x, y, w, h );
+		{
+			if( getTabType() == TAB_TYPE_CARD ) {
+				// some separators need to be omitted if selected tab is painted as card
+				int selectedIndex = tabPane.getSelectedIndex();
+				if( tabIndex != selectedIndex - 1 && tabIndex != selectedIndex )
+					paintTabSeparator( g, tabPlacement, x, y, w, h );
+			} else
+				paintTabSeparator( g, tabPlacement, x, y, w, h );
+		}
+
+		// paint active tab border
+		if( isSelected && getTabType() == TAB_TYPE_CARD )
+			paintCardTabBorder( g, tabPlacement, tabIndex, x, y, w, h );
+	}
+
+	/** @since 2 */
+	protected void paintCardTabBorder( Graphics g, int tabPlacement, int tabIndex, int x, int y, int w, int h ) {
+		Graphics2D g2 = (Graphics2D) g;
+
+		Path2D path = new Path2D.Float( Path2D.WIND_EVEN_ODD );
+		path.append( createCardTabOuterPath( tabPlacement, x, y, w, h ), false );
+		path.append( createCardTabInnerPath( tabPlacement, x, y, w, h ), false );
+
+		g.setColor( (tabSeparatorColor != null) ? tabSeparatorColor : contentAreaColor );
+		g2.fill( path );
+	}
+
+	/** @since 3.2 */
+	protected Shape createCardTabOuterPath( int tabPlacement, int x, int y, int w, int h ) {
+		float arc = scale( (float) cardTabArc ) / 2f;
+
+		switch( tabPlacement ) {
+			default:
+			case TOP:    return FlatUIUtils.createRoundRectanglePath( x, y, w, h, arc, arc, 0, 0 );
+			case BOTTOM: return FlatUIUtils.createRoundRectanglePath( x, y, w, h, 0, 0, arc, arc );
+			case LEFT:   return FlatUIUtils.createRoundRectanglePath( x, y, w, h, arc, 0, arc, 0 );
+			case RIGHT:  return FlatUIUtils.createRoundRectanglePath( x, y, w, h, 0, arc, 0, arc );
+		}
+	}
+
+	/** @since 3.2 */
+	protected Shape createCardTabInnerPath( int tabPlacement, int x, int y, int w, int h ) {
+		float bw = scale( (float) contentSeparatorHeight );
+		float arc = (scale( (float) cardTabArc ) / 2f) - bw;
+
+		switch( tabPlacement ) {
+			default:
+			case TOP:    return FlatUIUtils.createRoundRectanglePath( x + bw, y + bw, w - (bw * 2), h - bw,       arc, arc, 0, 0 );
+			case BOTTOM: return FlatUIUtils.createRoundRectanglePath( x + bw, y,      w - (bw * 2), h - bw,       0, 0, arc, arc );
+			case LEFT:   return FlatUIUtils.createRoundRectanglePath( x + bw, y + bw, w - bw,       h - (bw * 2), arc, 0, arc, 0 );
+			case RIGHT:  return FlatUIUtils.createRoundRectanglePath( x,      y + bw, w - bw,       h - (bw * 2), 0, arc, 0, arc );
+		}
 	}
 
 	protected void paintTabCloseButton( Graphics g, int tabIndex, int x, int y, int w, int h ) {
@@ -995,32 +1542,84 @@ public class FlatTabbedPaneUI
 		}
 	}
 
-	protected void paintTabSelection( Graphics g, int tabPlacement, int x, int y, int w, int h ) {
-		g.setColor( tabPane.isEnabled() ? underlineColor : disabledUnderlineColor );
+	protected void paintTabSelection( Graphics g, int tabPlacement, int tabIndex, int x, int y, int w, int h ) {
+		g.setColor( tabPane.isEnabled()
+			? (isTabbedPaneOrChildFocused() ? underlineColor : inactiveUnderlineColor)
+			: disabledUnderlineColor );
 
-		// paint underline selection
-		Insets contentInsets = getContentBorderInsets( tabPlacement );
-		int tabSelectionHeight = scale( this.tabSelectionHeight );
+		boolean isCard = (getTabType() == TAB_TYPE_CARD);
+		boolean atBottom = !isCard;
+		Insets contentInsets = atBottom
+			? ((!rotateTabRuns && runCount > 1 && !isScrollTabLayout() && getRunForTab( tabPane.getTabCount(), tabIndex ) > 0)
+				? new Insets( 0, 0, 0, 0 )
+				: getContentBorderInsets( tabPlacement ))
+			: null;
+
+		int tabSelectionHeight = scale( isCard ? cardTabSelectionHeight : this.tabSelectionHeight );
+		float arc = scale( (float) (isCard ? cardTabArc : tabSelectionArc) ) / 2f;
+		int sx = x, sy = y, sw = w, sh = h;
 		switch( tabPlacement ) {
 			case TOP:
 			default:
-				int sy = y + h + contentInsets.top - tabSelectionHeight;
-				g.fillRect( x, sy, w, tabSelectionHeight );
+				sy = atBottom ? (y + h + contentInsets.top - tabSelectionHeight) : y;
+				sh = tabSelectionHeight;
 				break;
 
 			case BOTTOM:
-				g.fillRect( x, y - contentInsets.bottom, w, tabSelectionHeight );
+				sy = atBottom ? (y - contentInsets.bottom) : (y + h - tabSelectionHeight);
+				sh = tabSelectionHeight;
 				break;
 
 			case LEFT:
-				int sx = x + w + contentInsets.left - tabSelectionHeight;
-				g.fillRect( sx, y, tabSelectionHeight, h );
+				sx = atBottom ? (x + w + contentInsets.left - tabSelectionHeight) : x;
+				sw = tabSelectionHeight;
 				break;
 
 			case RIGHT:
-				g.fillRect( x - contentInsets.right, y, tabSelectionHeight, h );
+				sx = atBottom ? (x - contentInsets.right) : (x + w - tabSelectionHeight);
+				sw = tabSelectionHeight;
 				break;
 		}
+
+		// apply insets
+		if( !isCard && tabSelectionInsets != null ) {
+			Insets insets = new Insets( 0, 0, 0, 0 );
+			rotateInsets( tabSelectionInsets, insets, tabPane.getTabPlacement() );
+
+			sx += scale( insets.left );
+			sy += scale( insets.top );
+			sw -= scale( insets.left + insets.right );
+			sh -= scale( insets.top + insets.bottom );
+		}
+
+		// paint underline selection
+		if( arc <= 0 )
+			g.fillRect( sx, sy, sw, sh );
+		else {
+			if( isCard ) {
+				Area area = new Area( createCardTabOuterPath( tabPlacement, x, y, w, h ) );
+				area.intersect( new Area( new Rectangle2D.Float( sx, sy, sw, sh ) ) );
+				((Graphics2D)g).fill( area );
+			} else
+				FlatUIUtils.paintSelection( (Graphics2D) g, sx, sy, sw, sh, null, arc, arc, arc, arc, 0 );
+		}
+	}
+
+	/** @since 2.2 */
+	@SuppressWarnings( "unchecked" )
+	protected boolean isTabbedPaneOrChildFocused() {
+		KeyboardFocusManager keyboardFocusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+
+		Object value = tabPane.getClientProperty( FlatClientProperties.COMPONENT_FOCUS_OWNER );
+		if( value instanceof Predicate ) {
+			return ((Predicate<JComponent>)value).test( tabPane ) &&
+				FlatUIUtils.isInActiveWindow( tabPane, keyboardFocusManager.getActiveWindow() );
+		}
+
+		Component focusOwner = keyboardFocusManager.getPermanentFocusOwner();
+		return focusOwner != null &&
+			SwingUtilities.isDescendingFrom( focusOwner, tabPane ) &&
+			FlatUIUtils.isInActiveWindow( focusOwner, keyboardFocusManager.getActiveWindow() );
 	}
 
 	/**
@@ -1030,12 +1629,13 @@ public class FlatTabbedPaneUI
 	 *   - paint full border (if enabled)
 	 *   - not invoking paintContentBorder*Edge() methods
 	 *   - repaint selection
+	 *   - painting active tab border style
 	 */
 	@Override
 	protected void paintContentBorder( Graphics g, int tabPlacement, int selectedIndex ) {
 		if( tabPane.getTabCount() <= 0 ||
 			contentSeparatorHeight == 0 ||
-			!clientPropertyBoolean( tabPane, TABBED_PANE_SHOW_CONTENT_SEPARATOR, true ) )
+			!clientPropertyBoolean( tabPane, TABBED_PANE_SHOW_CONTENT_SEPARATOR, showContentSeparator ) )
 		  return;
 
 		Insets insets = tabPane.getInsets();
@@ -1078,12 +1678,50 @@ public class FlatTabbedPaneUI
 		Insets ci = new Insets( 0, 0, 0, 0 );
 		rotateInsets( hasFullBorder ? new Insets( sh, sh, sh, sh ) : new Insets( sh, 0, 0, 0 ), ci, tabPlacement );
 
-		// paint content separator or full border
-		g.setColor( contentAreaColor );
+		// create path for content separator or full border
 		Path2D path = new Path2D.Float( Path2D.WIND_EVEN_ODD );
 		path.append( new Rectangle2D.Float( x, y, w, h ), false );
 		path.append( new Rectangle2D.Float( x + (ci.left / 100f), y + (ci.top / 100f),
 			w - (ci.left / 100f) - (ci.right / 100f), h - (ci.top / 100f) - (ci.bottom / 100f) ), false );
+
+		// add gap for selected tab to path
+		if( getTabType() == TAB_TYPE_CARD && selectedIndex >= 0 ) {
+			float csh = scale( (float) contentSeparatorHeight );
+
+			Rectangle tabRect = getTabBounds( tabPane, selectedIndex );
+			Rectangle2D.Float innerTabRect = new Rectangle2D.Float( tabRect.x + csh, tabRect.y + csh,
+				tabRect.width - (csh * 2), tabRect.height - (csh * 2) );
+
+			// Ensure that the separator outside the tabViewport is present (doesn't get cutoff by the active tab)
+			// If left unsolved the active tab is "visible" in the separator (the gap) even when outside the viewport
+			if( tabViewport != null )
+				Rectangle2D.intersect( tabViewport.getBounds(), innerTabRect, innerTabRect );
+
+			Rectangle2D.Float gap = null;
+			if( isHorizontalTabPlacement( tabPlacement ) ) {
+				if( innerTabRect.width > 0 ) {
+					float y2 = (tabPlacement == TOP) ? y : y + h - csh;
+					gap = new Rectangle2D.Float( innerTabRect.x, y2, innerTabRect.width, csh );
+				}
+			} else {
+				if( innerTabRect.height > 0 ) {
+					float x2 = (tabPlacement == LEFT) ? x : x + w - csh;
+					gap = new Rectangle2D.Float( x2, innerTabRect.y, csh, innerTabRect.height );
+				}
+			}
+
+			if( gap != null ) {
+				path.append( gap, false );
+
+				// fill gap in case that the tab is colored (e.g. focused or hover)
+				Color background = getTabBackground( tabPlacement, selectedIndex, true );
+				g.setColor( FlatUIUtils.deriveColor( background, tabPane.getBackground() ) );
+				((Graphics2D)g).fill( gap );
+			}
+		}
+
+		// paint content separator or full border
+		g.setColor( contentAreaColor );
 		((Graphics2D)g).fill( path );
 
 		// repaint selection in scroll-tab-layout because it may be painted before
@@ -1095,12 +1733,12 @@ public class FlatTabbedPaneUI
 			// (left and right if horizontal, top and bottom if vertical)
 			Shape oldClip = g.getClip();
 			Rectangle vr = tabViewport.getBounds();
-			if( isHorizontalTabPlacement() )
+			if( isHorizontalTabPlacement( tabPlacement ) )
 				g.clipRect( vr.x, 0, vr.width, tabPane.getHeight() );
 			else
 				g.clipRect( 0, vr.y, tabPane.getWidth(), vr.height );
 
-			paintTabSelection( g, tabPlacement, tabRect.x, tabRect.y, tabRect.width, tabRect.height );
+			paintTabSelection( g, tabPlacement, selectedIndex, tabRect.x, tabRect.y, tabRect.width, tabRect.height );
 			g.setClip( oldClip );
 		}
 	}
@@ -1114,19 +1752,30 @@ public class FlatTabbedPaneUI
 	protected String layoutAndClipLabel( int tabPlacement, FontMetrics metrics, int tabIndex,
 		String title, Icon icon, Rectangle tabRect, Rectangle iconRect, Rectangle textRect, boolean isSelected )
 	{
+		int rotation = getRealTabRotation( tabPlacement );
+		boolean leftToRight = isLeftToRight();
+
 		// remove tab insets and space for close button from the tab rectangle
 		// to get correctly clipped title
-		tabRect = FlatUIUtils.subtractInsets( tabRect, getTabInsets( tabPlacement, tabIndex ) );
+		tabRect = FlatUIUtils.subtractInsets( tabRect, getTabInsetsRotated( tabPlacement, tabIndex, rotation ) );
 		if( isTabClosable( tabIndex ) ) {
-			tabRect.width -= closeIcon.getIconWidth();
-			if( !isLeftToRight() )
-				tabRect.x += closeIcon.getIconWidth();
+			if( rotation == NONE ) {
+				int iconWidth = closeIcon.getIconWidth();
+				tabRect.width -= iconWidth;
+				if( !leftToRight )
+					tabRect.x += iconWidth;
+			} else {
+				int iconHeight = closeIcon.getIconHeight();
+				tabRect.height -= iconHeight;
+				if( (rotation == LEFT && leftToRight) || (rotation == RIGHT && !leftToRight) )
+					tabRect.y += iconHeight;
+			}
 		}
 
 		// icon placement
 		int verticalTextPosition;
 		int horizontalTextPosition;
-		switch( clientPropertyInt( tabPane, TABBED_PANE_TAB_ICON_PLACEMENT, LEADING ) ) {
+		switch( clientPropertyInt( tabPane, TABBED_PANE_TAB_ICON_PLACEMENT, tabIconPlacement ) ) {
 			default:
 			case LEADING:  verticalTextPosition = CENTER; horizontalTextPosition = TRAILING; break;
 			case TRAILING: verticalTextPosition = CENTER; horizontalTextPosition = LEADING; break;
@@ -1144,14 +1793,62 @@ public class FlatTabbedPaneUI
 			tabPane.putClientProperty( "html", view );
 
 		// layout label
-		String clippedTitle = SwingUtilities.layoutCompoundLabel( tabPane, metrics, title, icon,
-			CENTER, getTabAlignment( tabIndex ), verticalTextPosition, horizontalTextPosition,
-			tabRect, iconRect, textRect, scale( textIconGapUnscaled ) );
+		String clippedTitle = (rotation == NONE)
+			? SwingUtilities.layoutCompoundLabel( tabPane, metrics, title, icon,
+				CENTER, getTabAlignment( tabIndex ), verticalTextPosition, horizontalTextPosition,
+				tabRect, iconRect, textRect, scale( textIconGapUnscaled ) )
+			: layoutVerticalCompoundLabel( rotation, tabPane, metrics, title, icon,
+				CENTER, getTabAlignment( tabIndex ), verticalTextPosition, horizontalTextPosition,
+				tabRect, iconRect, textRect, scale( textIconGapUnscaled ) );
 
 		// remove temporary client property
 		tabPane.putClientProperty( "html", null );
 
 		return clippedTitle;
+	}
+
+	private String layoutVerticalCompoundLabel( int rotation, JComponent c, FontMetrics fm, String text, Icon icon,
+		int verticalAlignment, int horizontalAlignment, int verticalTextPosition, int horizontalTextPosition,
+		Rectangle viewR, Rectangle iconR, Rectangle textR, int textIconGap )
+	{
+		// layout non-rotated
+		Rectangle viewR2 = new Rectangle( viewR.height, viewR.width );
+		String clippedTitle = SwingUtilities.layoutCompoundLabel( c, fm, text, icon,
+			verticalAlignment, horizontalAlignment, verticalTextPosition, horizontalTextPosition,
+			viewR2, iconR, textR, textIconGap );
+
+		// rotate icon and text rectangles
+		if( rotation == LEFT ) {
+			rotateLeft( viewR, iconR );
+			rotateLeft( viewR, textR );
+		} else {
+			rotateRight( viewR, iconR );
+			rotateRight( viewR, textR );
+		}
+
+		return clippedTitle;
+	}
+
+	private void rotateLeft( Rectangle viewR, Rectangle r ) {
+		int x = viewR.x + r.y;
+		int y = viewR.y + (viewR.height - (r.x + r.width));
+		r.setBounds( x, y, r.height, r.width );
+	}
+
+	private void rotateRight( Rectangle viewR, Rectangle r ) {
+		int x = viewR.x + (viewR.width - (r.y + r.height));
+		int y = viewR.y + r.x;
+		r.setBounds( x, y, r.height, r.width );
+	}
+
+	/** @since 3.3 */
+	protected int getRealTabRotation( int tabPlacement ) {
+		int rotation = getTabRotation();
+		int realRotation = (rotation == AUTO)
+			? (tabPlacement == LEFT ? LEFT : (tabPlacement == RIGHT ? RIGHT : NONE))
+			: (rotation == LEFT || rotation == RIGHT ? rotation : NONE);
+		assert realRotation == NONE || realRotation == LEFT || realRotation == RIGHT;
+		return realRotation;
 	}
 
 	@Override
@@ -1188,13 +1885,23 @@ public class FlatTabbedPaneUI
 	protected Rectangle getTabCloseBounds( int tabIndex, int x, int y, int w, int h, Rectangle dest ) {
 		int iconWidth = closeIcon.getIconWidth();
 		int iconHeight = closeIcon.getIconHeight();
-		Insets tabInsets = getTabInsets( tabPane.getTabPlacement(), tabIndex );
+		int tabPlacement = tabPane.getTabPlacement();
+		int rotation = getRealTabRotation( tabPlacement );
+		Insets tabInsets = getTabInsetsRotated( tabPlacement, tabIndex, rotation );
+		boolean leftToRight = isLeftToRight();
 
 		// use one-third of right/left tab insets as gap between tab text and close button
-		dest.x = isLeftToRight()
-			? (x + w - (tabInsets.right / 3 * 2) - iconWidth)
-			: (x + (tabInsets.left / 3 * 2));
-		dest.y = y + (h - iconHeight) / 2;
+		if( rotation == NONE ) {
+			dest.x = leftToRight
+				? (x + w - (tabInsets.right / 3 * 2) - iconWidth)		// right
+				: (x + (tabInsets.left / 3 * 2));						// left
+			dest.y = y + (h - iconHeight) / 2;
+		} else {
+			dest.x = x + (w - iconWidth) / 2;
+			dest.y = ((rotation == RIGHT && leftToRight) || (rotation == LEFT && !leftToRight))
+				? (y + h - (tabInsets.bottom / 3 * 2) - iconHeight)		// bottom
+				: (y + (tabInsets.top / 3 * 2));						// top
+		}
 		dest.width = iconWidth;
 		dest.height = iconHeight;
 		return dest;
@@ -1203,12 +1910,17 @@ public class FlatTabbedPaneUI
 	protected Rectangle getTabCloseHitArea( int tabIndex ) {
 		Rectangle tabRect = getTabBounds( tabPane, tabIndex );
 		Rectangle tabCloseRect = getTabCloseBounds( tabIndex, tabRect.x, tabRect.y, tabRect.width, tabRect.height, calcRect );
-		return new Rectangle( tabCloseRect.x, tabRect.y, tabCloseRect.width, tabRect.height );
+		return (getRealTabRotation( tabPane.getTabPlacement() ) == NONE)
+			? new Rectangle( tabCloseRect.x, tabRect.y, tabCloseRect.width, tabRect.height )
+			: new Rectangle( tabRect.x, tabCloseRect.y, tabRect.width, tabCloseRect.height );
 	}
 
 	protected boolean isTabClosable( int tabIndex ) {
+		if( tabIndex < 0 )
+			return false;
+
 		Object value = getTabClientProperty( tabIndex, TABBED_PANE_TAB_CLOSABLE );
-		return (value instanceof Boolean) ? (boolean) value : false;
+		return (value instanceof Boolean) ? (boolean) value : tabClosable;
 	}
 
 	@SuppressWarnings( { "unchecked" } )
@@ -1250,6 +1962,11 @@ public class FlatTabbedPaneUI
 		super.getTabRunCount( tabPane );
 	}
 
+	@Override
+	protected boolean shouldRotateTabRuns( int tabPlacement ) {
+		return rotateTabRuns;
+	}
+
 	private boolean isLastInRun( int tabIndex ) {
 		int run = getRunForTab( tabPane.getTabCount(), tabIndex );
 		return lastTabInRun( tabPane.getTabCount(), run ) == tabIndex;
@@ -1263,9 +1980,17 @@ public class FlatTabbedPaneUI
 		return tabPane.getComponentOrientation().isLeftToRight();
 	}
 
-	protected boolean isHorizontalTabPlacement() {
-		int tabPlacement = tabPane.getTabPlacement();
+	/** @since 3.3 */
+	protected boolean isHorizontalTabPlacement( int tabPlacement ) {
 		return tabPlacement == TOP || tabPlacement == BOTTOM;
+	}
+
+	/**
+	 * Returns {@code true} if tab placement is top/bottom and text is painted horizontally or
+	 * if tab placement is left/right and text is painted vertically (rotated).
+	 */
+	private boolean isHorizontalOrRotated( int tabPlacement ) {
+		return isHorizontalTabPlacement( tabPlacement ) == (getRealTabRotation( tabPlacement ) == NONE);
 	}
 
 	protected boolean isSmoothScrollingEnabled() {
@@ -1282,7 +2007,16 @@ public class FlatTabbedPaneUI
 		return tabPane.getTabCount() == 1 &&
 			leadingComponent == null &&
 			trailingComponent == null &&
-			clientPropertyBoolean( tabPane, TABBED_PANE_HIDE_TAB_AREA_WITH_ONE_TAB, false );
+			clientPropertyBoolean( tabPane, TABBED_PANE_HIDE_TAB_AREA_WITH_ONE_TAB, hideTabAreaWithOneTab );
+	}
+
+	/** @since 2 */
+	protected int getTabType() {
+		Object value = tabPane.getClientProperty( TABBED_PANE_TAB_TYPE );
+
+		return (value instanceof String)
+			? parseTabType( (String) value )
+			: tabType;
 	}
 
 	protected int getTabsPopupPolicy() {
@@ -1337,6 +2071,29 @@ public class FlatTabbedPaneUI
 			: tabWidthMode;
 	}
 
+	/** @since 3.3 */
+	protected int getTabRotation() {
+		Object value = tabPane.getClientProperty( TABBED_PANE_TAB_ROTATION );
+		if( value instanceof Integer )
+			return (Integer) value;
+
+		return (value instanceof String)
+			? parseTabRotation( (String) value )
+			: tabRotation;
+	}
+
+	/** @since 2 */
+	protected static int parseTabType( String str ) {
+		if( str == null )
+			return TAB_TYPE_UNDERLINED;
+
+		switch( str ) {
+			default:
+			case TABBED_PANE_TAB_TYPE_UNDERLINED:		return TAB_TYPE_UNDERLINED;
+			case TABBED_PANE_TAB_TYPE_CARD:				return TAB_TYPE_CARD;
+		}
+	}
+
 	protected static int parseTabsPopupPolicy( String str ) {
 		if( str == null )
 			return AS_NEEDED;
@@ -1384,6 +2141,16 @@ public class FlatTabbedPaneUI
 		}
 	}
 
+	private static String alignmentToString( int value, String defaultValue ) {
+		switch( value ) {
+			case LEADING:		return TABBED_PANE_ALIGN_LEADING;
+			case TRAILING:		return TABBED_PANE_ALIGN_TRAILING;
+			case CENTER:		return TABBED_PANE_ALIGN_CENTER;
+			case FILL:			return TABBED_PANE_ALIGN_FILL;
+			default:			return defaultValue;
+		}
+	}
+
 	protected static int parseTabWidthMode( String str ) {
 		if( str == null )
 			return WIDTH_MODE_PREFERRED;
@@ -1393,6 +2160,33 @@ public class FlatTabbedPaneUI
 			case TABBED_PANE_TAB_WIDTH_MODE_PREFERRED:	return WIDTH_MODE_PREFERRED;
 			case TABBED_PANE_TAB_WIDTH_MODE_EQUAL:		return WIDTH_MODE_EQUAL;
 			case TABBED_PANE_TAB_WIDTH_MODE_COMPACT:	return WIDTH_MODE_COMPACT;
+		}
+	}
+
+	/** @since 3.3 */
+	protected static int parseTabRotation( String str ) {
+		if( str == null )
+			return WIDTH_MODE_PREFERRED;
+
+		switch( str ) {
+			default:
+			case TABBED_PANE_TAB_ROTATION_NONE:		return NONE;
+			case TABBED_PANE_TAB_ROTATION_AUTO:		return AUTO;
+			case TABBED_PANE_TAB_ROTATION_LEFT:		return LEFT;
+			case TABBED_PANE_TAB_ROTATION_RIGHT:	return RIGHT;
+		}
+	}
+
+	protected static int parseTabIconPlacement( String str ) {
+		if( str == null )
+			return LEADING;
+
+		switch( str ) {
+			default:
+			case "leading":		return LEADING;
+			case "trailing":	return TRAILING;
+			case "top":			return TOP;
+			case "bottom":		return BOTTOM;
 		}
 	}
 
@@ -1456,11 +2250,6 @@ public class FlatTabbedPaneUI
 			// fix x location in rects
 			rects[i].x += sx;
 			rects[i].y += sy;
-
-			// fix tab component location
-			Component c = tabPane.getTabComponentAt( i );
-			if( c != null )
-				c.setLocation( c.getX() + sx, c.getY() + sy );
 		}
 	}
 
@@ -1468,11 +2257,6 @@ public class FlatTabbedPaneUI
 		int rsw = sw / rects.length;
 		int x = rects[0].x - (leftToRight ? 0 : rsw);
 		for( int i = 0; i < rects.length; i++ ) {
-			// fix tab component location
-			Component c = tabPane.getTabComponentAt( i );
-			if( c != null )
-				c.setLocation( x + (c.getX() - rects[i].x) + (rsw / 2), c.getY() );
-
 			// fix x location and width in rects
 			rects[i].x = x;
 			rects[i].width += rsw;
@@ -1494,11 +2278,6 @@ public class FlatTabbedPaneUI
 		int rsh = sh / rects.length;
 		int y = rects[0].y;
 		for( int i = 0; i < rects.length; i++ ) {
-			// fix tab component location
-			Component c = tabPane.getTabComponentAt( i );
-			if( c != null )
-				c.setLocation( c.getX(), y + (c.getY() - rects[i].y) + (rsh / 2) );
-
 			// fix y location and height in rects
 			rects[i].y = y;
 			rects[i].height += rsh;
@@ -1522,9 +2301,35 @@ public class FlatTabbedPaneUI
 		return (rects[last].y + rects[last].height) - rects[0].y;
 	}
 
+	//---- interface FlatTitlePane.TitleBarCaptionHitTest ----
+
+	/** @since 3.4 */
+	@Override
+	public Boolean isTitleBarCaptionAt( int x, int y ) {
+		// Note: not using tabForCoordinate() here because this may validate layout and cause dead lock
+
+		if( moreTabsButton != null ) {
+			// convert x,y from JTabbedPane coordinate space to ScrollableTabPanel coordinate space
+			Point viewPosition = tabViewport.getViewPosition();
+			x = x - tabViewport.getX() + viewPosition.x;
+			y = y - tabViewport.getY() + viewPosition.y;
+
+			// check whether point is within viewport
+			if( !tabViewport.getViewRect().contains( x, y ) )
+				return null; // check children
+		}
+
+		for( int i = 0; i < rects.length; i++ ) {
+			if( rects[i].contains( x, y ) )
+				return false;
+		}
+
+		return null; // check children
+	}
+
 	//---- class TabCloseButton -----------------------------------------------
 
-	private class TabCloseButton
+	private static class TabCloseButton
 		extends JButton
 		implements UIResource
 	{
@@ -1542,6 +2347,20 @@ public class FlatTabbedPaneUI
 			super( new BorderLayout() );
 			add( c );
 		}
+
+		@SuppressWarnings( "deprecation" )
+		@Override
+		public void reshape( int x, int y, int w, int h ) {
+			// Avoid that leading/trailing tab area components are temporary moved/resized
+			// to content area bounds (done in BasicTabbedPaneUI.TabbedPaneLayout.layoutContainer()
+			// and in BasicTabbedPaneUI.TabbedPaneScrollLayout.layoutContainer())
+			// and subsequently moved/resized to its final bounds within the tab area.
+			// This avoids an unnecessary repaint (and maybe re-layout) of the content area.
+			if( inBasicLayoutContainer )
+				return;
+
+			super.reshape( x, y, w, h );
+		}
 	}
 
 	//---- class FlatTabAreaButton --------------------------------------------
@@ -1553,23 +2372,18 @@ public class FlatTabbedPaneUI
 			super( direction, arrowType,
 				FlatTabbedPaneUI.this.foreground, FlatTabbedPaneUI.this.disabledForeground,
 				null, buttonHoverBackground, null, buttonPressedBackground );
-			setArrowWidth( 10 );
+			setArrowWidth( 11 );
+		}
+
+		protected void updateStyle() {
+			updateStyle( arrowType,
+				FlatTabbedPaneUI.this.foreground, FlatTabbedPaneUI.this.disabledForeground,
+				null, buttonHoverBackground, null, buttonPressedBackground );
 		}
 
 		@Override
 		protected Color deriveBackground( Color background ) {
 			return FlatUIUtils.deriveColor( background, tabPane.getBackground() );
-		}
-
-		@Override
-		public void paint( Graphics g ) {
-			// fill button background
-			if( tabsOpaque || tabPane.isOpaque() ) {
-				g.setColor( tabPane.getBackground() );
-				g.fillRect( 0, 0, getWidth(), getHeight() );
-			}
-
-			super.paint( g );
 		}
 
 		@Override
@@ -1689,7 +2503,7 @@ public class FlatTabbedPaneUI
 		}
 
 		protected JMenuItem createTabMenuItem( int tabIndex ) {
-			// search for tab name in this places
+			// search for tab name in these places
 			//   1. tab title
 			//   2. text of label or text component in custom tab component (including children)
 			//   3. accessible name of tab
@@ -1722,7 +2536,7 @@ public class FlatTabbedPaneUI
 				menuItem.setOpaque( true );
 			}
 
-			if( !tabPane.isEnabledAt( tabIndex ) )
+			if( !tabPane.isEnabled() || !tabPane.isEnabledAt( tabIndex ) )
 				menuItem.setEnabled( false );
 
 			menuItem.addActionListener( e -> selectTab( tabIndex ) );
@@ -1783,19 +2597,19 @@ public class FlatTabbedPaneUI
 		@Override
 		public void popupMenuWillBecomeVisible( PopupMenuEvent e ) {
 			popupVisible = true;
-			repaint();
+			HiDPIUtils.repaint( this );
 		}
 
 		@Override
 		public void popupMenuWillBecomeInvisible( PopupMenuEvent e ) {
 			popupVisible = false;
-			repaint();
+			HiDPIUtils.repaint( this );
 		}
 
 		@Override
 		public void popupMenuCanceled( PopupMenuEvent e ) {
 			popupVisible = false;
-			repaint();
+			HiDPIUtils.repaint( this );
 		}
 	}
 
@@ -1916,7 +2730,7 @@ public class FlatTabbedPaneUI
 				? targetViewPosition
 				: tabViewport.getViewPosition();
 			Dimension viewSize = tabViewport.getViewSize();
-			boolean horizontal = isHorizontalTabPlacement();
+			boolean horizontal = isHorizontalTabPlacement( tabPane.getTabPlacement() );
 			int x = viewPosition.x;
 			int y = viewPosition.y;
 			if( horizontal )
@@ -1933,7 +2747,7 @@ public class FlatTabbedPaneUI
 			if( isPreciseWheel &&
 				getScrollButtonsPlacement() == BOTH &&
 				getScrollButtonsPolicy() == AS_NEEDED_SINGLE &&
-				(isLeftToRight() || !horizontal) || // scroll buttons are hidden in right-to-left
+				(isLeftToRight() || !horizontal) && // scroll buttons are hidden in right-to-left
 				scrollBackwardButtonPrefSize != null )
 			{
 				// special cases for scrolling with touchpad or high-resolution wheel:
@@ -2118,7 +2932,7 @@ public class FlatTabbedPaneUI
 			if( tabPane == null || tabViewport == null )
 				return;
 
-			if( !scrolled || tabViewport == null )
+			if( !scrolled )
 				return;
 			scrolled = false;
 
@@ -2131,11 +2945,12 @@ public class FlatTabbedPaneUI
 
 	private class Handler
 		implements MouseListener, MouseMotionListener, PropertyChangeListener,
-			ChangeListener, ComponentListener, ContainerListener
+			ChangeListener, ComponentListener, ContainerListener, FocusListener
 	{
 		MouseListener mouseDelegate;
 		PropertyChangeListener propertyChangeDelegate;
 		ChangeListener changeDelegate;
+		FocusListener focusDelegate;
 
 		private final PropertyChangeListener contentListener = this::contentPropertyChange;
 
@@ -2176,7 +2991,7 @@ public class FlatTabbedPaneUI
 		public void mousePressed( MouseEvent e ) {
 			updateRollover( e );
 
-			if( !isPressedTabClose() )
+			if( !isPressedTabClose() && SwingUtilities.isLeftMouseButton( e ) )
 				mouseDelegate.mousePressed( e );
 		}
 
@@ -2230,10 +3045,8 @@ public class FlatTabbedPaneUI
 			setRolloverTab( tabIndex );
 
 			// check whether mouse hit tab close area
-			boolean hitClose = isTabClosable( tabIndex )
-				? getTabCloseHitArea( tabIndex ).contains( x, y )
-				: false;
-			if( e.getID() == MouseEvent.MOUSE_PRESSED )
+			boolean hitClose = isTabClosable( tabIndex ) && getTabCloseHitArea( tabIndex ).contains( x, y );
+			if( e.getID() == MouseEvent.MOUSE_PRESSED && SwingUtilities.isLeftMouseButton( e ) )
 				pressedTabIndex = hitClose ? tabIndex : -1;
 			setRolloverTabClose( hitClose );
 			setPressedTabClose( hitClose && tabIndex == pressedTabIndex );
@@ -2241,6 +3054,8 @@ public class FlatTabbedPaneUI
 			// update tooltip
 			if( tabIndex >= 0 && hitClose ) {
 				Object closeTip = getTabClientProperty( tabIndex, TABBED_PANE_TAB_CLOSE_TOOLTIPTEXT );
+				if( closeTip == null )
+					closeTip = tabCloseToolTipText;
 				if( closeTip instanceof String )
 					setCloseToolTip( tabIndex, (String) closeTip );
 				else
@@ -2253,8 +3068,7 @@ public class FlatTabbedPaneUI
 			if( tabIndex == lastTipTabIndex )
 				return; // closeTip already set
 
-			if( tabIndex != lastTipTabIndex )
-				restoreTabToolTip();
+			restoreTabToolTip();
 
 			lastTipTabIndex = tabIndex;
 			lastTip = tabPane.getToolTipTextAt( lastTipTabIndex );
@@ -2303,6 +3117,10 @@ public class FlatTabbedPaneUI
 					break;
 
 				case TABBED_PANE_SHOW_TAB_SEPARATORS:
+				case TABBED_PANE_TAB_TYPE:
+					HiDPIUtils.repaint( tabPane );
+					break;
+
 				case TABBED_PANE_SHOW_CONTENT_SEPARATOR:
 				case TABBED_PANE_HAS_FULL_BORDER:
 				case TABBED_PANE_HIDE_TAB_AREA_WITH_ONE_TAB:
@@ -2319,17 +3137,18 @@ public class FlatTabbedPaneUI
 				case TABBED_PANE_TAB_AREA_ALIGNMENT:
 				case TABBED_PANE_TAB_ALIGNMENT:
 				case TABBED_PANE_TAB_WIDTH_MODE:
+				case TABBED_PANE_TAB_ROTATION:
 				case TABBED_PANE_TAB_ICON_PLACEMENT:
 				case TABBED_PANE_TAB_CLOSABLE:
 					tabPane.revalidate();
-					tabPane.repaint();
+					HiDPIUtils.repaint( tabPane );
 					break;
 
 				case TABBED_PANE_LEADING_COMPONENT:
 					uninstallLeadingComponent();
 					installLeadingComponent();
 					tabPane.revalidate();
-					tabPane.repaint();
+					HiDPIUtils.repaint( tabPane );
 					ensureSelectedTabIsVisibleLater();
 					break;
 
@@ -2337,8 +3156,15 @@ public class FlatTabbedPaneUI
 					uninstallTrailingComponent();
 					installTrailingComponent();
 					tabPane.revalidate();
-					tabPane.repaint();
+					HiDPIUtils.repaint( tabPane );
 					ensureSelectedTabIsVisibleLater();
+					break;
+
+				case STYLE:
+				case STYLE_CLASS:
+					installStyle();
+					tabPane.revalidate();
+					HiDPIUtils.repaint( tabPane );
 					break;
 			}
 		}
@@ -2362,7 +3188,7 @@ public class FlatTabbedPaneUI
 				case TABBED_PANE_TAB_ALIGNMENT:
 				case TABBED_PANE_TAB_CLOSABLE:
 					tabPane.revalidate();
-					tabPane.repaint();
+					HiDPIUtils.repaint( tabPane );
 					break;
 			}
 		}
@@ -2394,10 +3220,47 @@ public class FlatTabbedPaneUI
 			if( !(c instanceof UIResource) )
 				c.removePropertyChangeListener( contentListener );
 		}
+
+		//---- interface FocusListener ----
+
+		@Override
+		public void focusGained( FocusEvent e ) {
+			focusDelegate.focusGained( e );
+			repaintTab( tabPane.getSelectedIndex() );
+		}
+
+		@Override
+		public void focusLost( FocusEvent e ) {
+			focusDelegate.focusLost( e );
+			repaintTab( tabPane.getSelectedIndex() );
+		}
 	}
 
 	//---- class FlatTabbedPaneLayout -----------------------------------------
 
+	/**
+	 * Layout manager for wrap tab layout policy (and base class for scroll tab layout policy).
+	 * <p>
+	 * Component hierarchy for wrap tab layout policy:
+	 * <pre>{@code
+	 * JTabbedPane
+	 *    +- 1...n tab content components
+	 *    +- (optional) BasicTabbedPaneUI.TabContainer (extends JPanel)
+	 *    |  +- 1..n tab components (shown in tab area)
+	 *    +- (optional) ContainerUIResource (extends JPanel)
+	 *    |  +- leading component
+	 *    +- (optional) ContainerUIResource (extends JPanel)
+	 *       +- trailing component
+	 * }</pre>
+	 * <p>
+	 * Instead of using {@code super.layoutContainer(Container)} and fixing some
+	 * component bounds, this class implements {@code layoutContainer(Container)}
+	 * and moves/resizes components only once.
+	 * This avoids that some components are moved/resized twice, which would unnecessary
+	 * repaint and relayout tabbed pane. In some special case this resulted in
+	 * "endless" layouting and repainting when using nested tabbed panes (top and
+	 * bottom tab placement) and RSyntaxTextArea (with enabled line-wrapping) as tab content.
+	 */
 	protected class FlatTabbedPaneLayout
 		extends TabbedPaneLayout
 	{
@@ -2432,9 +3295,13 @@ public class FlatTabbedPaneUI
 			return true;
 		}
 
+		/**
+		 * Calculate preferred size of the tab area.
+		 * Used only if {@link #isContentEmpty()} returns {@code true}.
+		 */
 		protected Dimension calculateTabAreaSize() {
-			boolean horizontal = isHorizontalTabPlacement();
 			int tabPlacement = tabPane.getTabPlacement();
+			boolean horizontal = isHorizontalTabPlacement( tabPlacement );
 			FontMetrics metrics = getFontMetrics();
 			int fontHeight = metrics.getHeight();
 
@@ -2466,23 +3333,210 @@ public class FlatTabbedPaneUI
 				height + insets.bottom + insets.top + tabAreaInsets.top + tabAreaInsets.bottom );
 		}
 
+		@SuppressWarnings( "deprecation" )
 		@Override
 		public void layoutContainer( Container parent ) {
-			super.layoutContainer( parent );
+			setRolloverTab( -1 );
+			calculateLayoutInfo();
 
-			Rectangle bounds = tabPane.getBounds();
-			Insets insets = tabPane.getInsets();
+			// update visible component
+			boolean shouldChangeFocus = false;
+			int selectedIndex = tabPane.getSelectedIndex();
+			if( selectedIndex >= 0 ) {
+				// change visible component only if tab content is not null
+				// (see comments in JTabbedPane.fireStateChanged()
+				// and in BasicTabbedPaneUI.TabbedPaneLayout.layoutContainer())
+				Component oldComp = getVisibleComponent();
+				Component newComp = tabPane.getComponentAt( selectedIndex );
+				if( newComp != null && newComp != oldComp ) {
+					shouldChangeFocus = (SwingUtilities.findFocusOwner( oldComp ) != null);
+					setVisibleComponent( newComp );
+				}
+			} else
+				setVisibleComponent( null );
+
+			// layout
+			layoutContainerImpl();
+
+			// for compatibility with super class; usually not done here
+			// because already done in JTabbedPane.fireStateChanged()
+			if( shouldChangeFocus ) {
+				// use action because BasicTabbedPaneUI.requestFocusForVisibleComponent()
+				// and SwingUtilities2.tabbedPaneChangeFocusTo() are internal methods
+				Action action = tabPane.getActionMap().get( "requestFocusForVisibleComponent" );
+				if( action != null )
+					action.actionPerformed( new ActionEvent( tabPane, ActionEvent.ACTION_PERFORMED, null ) );
+			}
+		}
+
+		/** @since 3.3 */
+		protected void layoutContainerImpl() {
 			int tabPlacement = tabPane.getTabPlacement();
 			int tabAreaAlignment = getTabAreaAlignment();
 			Insets tabAreaInsets = getRealTabAreaInsets( tabPlacement );
 			boolean leftToRight = isLeftToRight();
 
-			// layout leading and trailing components in tab area
+			// tab area bounds
+			Rectangle tr = getTabAreaLayoutBounds( tabPlacement, tabAreaInsets );
+
+			// layout tab area
 			if( tabPlacement == TOP || tabPlacement == BOTTOM ) {
 				// fix x-locations of tabs in right-to-left component orientation
 				if( !leftToRight )
-					shiftTabs( insets.left + tabAreaInsets.right + getTrailingPreferredWidth(), 0 );
+					shiftTabs( tabPane.getInsets().left + tabAreaInsets.right + getTrailingPreferredWidth(), 0 );
 
+				// layout left and right components
+				layoutLeftAndRightComponents( tr, tabAreaAlignment, tabAreaInsets, (runCount == 1), true, leftToRight );
+			} else { // LEFT and RIGHT tab placement
+				// layout top and bottom components
+				layoutTopAndBottomComponents( tr, tabAreaAlignment, tabAreaInsets, (runCount == 1), true );
+			}
+
+			// layout content area components
+			// (must be done after layouting tab area, which updates tab rectangles,
+			// which are used to layout tab components in layoutTabComponents())
+			layoutChildComponents();
+		}
+
+		/** @since 3.3 */
+		protected void layoutChildComponents() {
+			if( tabPane.getComponentCount() == 0 )
+				return;
+
+			Rectangle contentAreaBounds = getContentAreaLayoutBounds( tabPane.getTabPlacement(), tabAreaInsets );
+			for( Component c : tabPane.getComponents() )
+				layoutChildComponent( c, contentAreaBounds );
+		}
+
+		/** @since 3.3 */
+		protected void layoutChildComponent( Component c, Rectangle contentAreaBounds ) {
+			if( c == leadingComponent || c == trailingComponent )
+				return;
+
+			if( isTabContainer( c ) )
+				layoutTabContainer( c );
+			else
+				c.setBounds( contentAreaBounds );
+		}
+
+		boolean isTabContainer( Component c ) {
+			return c.getClass().getName().equals( "javax.swing.plaf.basic.BasicTabbedPaneUI$TabContainer" );
+		}
+
+		/**
+		 * Layouts container used for custom components in tabs.
+		 */
+		private void layoutTabContainer( Component tabContainer ) {
+			int tabPlacement = tabPane.getTabPlacement();
+			Rectangle bounds = tabPane.getBounds();
+			Insets insets = tabPane.getInsets();
+			Insets contentInsets = getContentBorderInsets( tabPlacement );
+
+			boolean horizontal = isHorizontalTabPlacement( tabPlacement );
+			int tabAreaWidth = !horizontal ? calculateTabAreaWidth( tabPlacement, runCount, maxTabWidth ) : 0;
+			int tabAreaHeight = horizontal ? calculateTabAreaHeight( tabPlacement, runCount, maxTabHeight ) : 0;
+			int w = (tabAreaWidth != 0)
+				? tabAreaWidth + insets.left + insets.right + contentInsets.left + contentInsets.right
+				: bounds.width;
+			int h = (tabAreaHeight != 0)
+				? tabAreaHeight + insets.top + insets.bottom + contentInsets.top + contentInsets.bottom
+				: bounds.height;
+
+			int x = (tabPlacement == RIGHT) ? bounds.width - w : 0;
+			int y = (tabPlacement == BOTTOM) ? bounds.height - h : 0;
+
+			tabContainer.setBounds( x, y, w, h );
+
+			// layout tab components in tab container
+			layoutTabComponents( tabContainer );
+		}
+
+		/**
+		 * Layouts custom components in tabs.
+		 */
+		void layoutTabComponents( Component tabContainer ) {
+			if( tabContainer instanceof Container && ((Container)tabContainer).getComponentCount() == 0 )
+				return;
+
+			int tabPlacement = tabPane.getTabPlacement();
+			int selectedTabIndex = tabPane.getSelectedIndex();
+			Rectangle r = new Rectangle();
+			int deltaX = -tabContainer.getX();
+			int deltaY = -tabContainer.getY();
+
+			if( isScrollTabLayout() ) {
+				// convert delta x,y from JTabbedPane coordinate space to ScrollableTabPanel coordinate space
+				Point viewPosition = tabViewport.getViewPosition();
+				deltaX = deltaX - tabViewport.getX() + viewPosition.x;
+				deltaY = deltaY - tabViewport.getY() + viewPosition.y;
+			}
+
+			int tabCount = tabPane.getTabCount();
+			for( int i = 0; i < tabCount; i++ ) {
+				Component c = tabPane.getTabComponentAt( i );
+				if( c == null )
+					continue;
+
+				// outer bounds
+				Rectangle tabBounds = getTabBounds( i, r );
+				Insets tabInsets = getTabInsets( tabPlacement, i );
+				int ox = tabBounds.x + tabInsets.left + deltaX;
+				int oy = tabBounds.y + tabInsets.top + deltaY;
+				int ow = tabBounds.width - tabInsets.left - tabInsets.right;
+				int oh = tabBounds.height - tabInsets.top - tabInsets.bottom;
+
+				// center
+				Dimension prefSize = c.getPreferredSize();
+				int x = ox + ((ow - prefSize.width) / 2);
+				int y = oy + ((oh - prefSize.height) / 2);
+
+				// shift
+				boolean selected = (i == selectedTabIndex);
+				x += getTabLabelShiftX( tabPlacement, i, selected );
+				y += getTabLabelShiftY( tabPlacement, i, selected );
+
+				c.setBounds( x, y, prefSize.width, prefSize.height );
+			}
+		}
+
+		/**
+		 * Returns bounds for content components.
+		 */
+		Rectangle getContentAreaLayoutBounds( int tabPlacement, Insets tabAreaInsets ) {
+			int tabPaneWidth = tabPane.getWidth();
+			int tabPaneHeight = tabPane.getHeight();
+			Insets insets = tabPane.getInsets();
+			Insets contentInsets = getContentBorderInsets( tabPlacement );
+
+			boolean horizontal = isHorizontalTabPlacement( tabPlacement );
+			int tabAreaWidth = !horizontal ? calculateTabAreaWidth( tabPlacement, runCount, maxTabWidth ) : 0;
+			int tabAreaHeight = horizontal ? calculateTabAreaHeight( tabPlacement, runCount, maxTabHeight ) : 0;
+
+			Rectangle cr = new Rectangle();
+			cr.x = insets.left + contentInsets.left;
+			cr.y = insets.top + contentInsets.top;
+			cr.width = tabPaneWidth - insets.left - insets.right - contentInsets.left - contentInsets.right - tabAreaWidth;
+			cr.height = tabPaneHeight - insets.top - insets.bottom - contentInsets.top - contentInsets.bottom - tabAreaHeight;
+			if( tabPlacement == TOP )
+				cr.y += tabAreaHeight;
+			else if( tabPlacement == LEFT )
+				cr.x += tabAreaWidth;
+			return cr;
+		}
+
+		/**
+		 * Returns bounds for leading/trailing components and tab area.
+		 *
+		 * Note: Returns bounds for first tabs row only.
+		 * For multi-rows tabs in wrap mode, the returned bounds does not include full tab area.
+		 */
+		Rectangle getTabAreaLayoutBounds( int tabPlacement, Insets tabAreaInsets ) {
+			int tabPaneWidth = tabPane.getWidth();
+			int tabPaneHeight = tabPane.getHeight();
+			Insets insets = tabPane.getInsets();
+
+			Rectangle tr = new Rectangle();
+			if( tabPlacement == TOP || tabPlacement == BOTTOM ) {
 				// tab area height (maxTabHeight is zero if tab count is zero)
 				int tabAreaHeight = (maxTabHeight > 0)
 					? maxTabHeight
@@ -2491,58 +3545,12 @@ public class FlatTabbedPaneUI
 						scale( clientPropertyInt( tabPane, TABBED_PANE_TAB_HEIGHT, tabHeight ) ) );
 
 				// tab area bounds
-				int tx = insets.left;
-				int ty = (tabPlacement == TOP)
+				tr.x = insets.left;
+				tr.y = (tabPlacement == TOP)
 					? insets.top + tabAreaInsets.top
-					: (bounds.height - insets.bottom - tabAreaInsets.bottom - tabAreaHeight);
-				int tw = bounds.width - insets.left - insets.right;
-				int th = tabAreaHeight;
-
-				int leadingWidth = getLeadingPreferredWidth();
-				int trailingWidth = getTrailingPreferredWidth();
-
-				// apply tab area alignment
-				if( runCount == 1 && rects.length > 0 ) {
-					int availWidth = tw - leadingWidth - trailingWidth - tabAreaInsets.left - tabAreaInsets.right;
-					int totalTabWidth = rectsTotalWidth( leftToRight );
-					int diff = availWidth - totalTabWidth;
-
-					switch( tabAreaAlignment ) {
-						case LEADING:
-							trailingWidth += diff;
-							break;
-
-						case TRAILING:
-							shiftTabs( leftToRight ? diff : -diff, 0 );
-							leadingWidth += diff;
-							break;
-
-						case CENTER:
-							shiftTabs( (leftToRight ? diff : -diff) / 2, 0 );
-							leadingWidth += diff / 2;
-							trailingWidth += diff - (diff / 2);
-							break;
-
-						case FILL:
-							stretchTabsWidth( diff, leftToRight );
-							break;
-					}
-				} else if( rects.length == 0 )
-					trailingWidth = tw - leadingWidth;
-
-				// layout left component
-				Container leftComponent = leftToRight ? leadingComponent : trailingComponent;
-				if( leftComponent != null ) {
-					int leftWidth = leftToRight ? leadingWidth : trailingWidth;
-					leftComponent.setBounds( tx, ty, leftWidth, th );
-				}
-
-				// layout right component
-				Container rightComponent = leftToRight ? trailingComponent : leadingComponent;
-				if( rightComponent != null ) {
-					int rightWidth = leftToRight ? trailingWidth : leadingWidth;
-					rightComponent.setBounds( tx + tw - rightWidth, ty, rightWidth, th );
-				}
+					: (tabPaneHeight - insets.bottom - tabAreaInsets.bottom - tabAreaHeight);
+				tr.width = tabPaneWidth - insets.left - insets.right;
+				tr.height = tabAreaHeight;
 			} else { // LEFT and RIGHT tab placement
 				// tab area width (maxTabWidth is zero if tab count is zero)
 				int tabAreaWidth = (maxTabWidth > 0)
@@ -2550,53 +3558,122 @@ public class FlatTabbedPaneUI
 					: Math.max( getLeadingPreferredWidth(), getTrailingPreferredWidth() );
 
 				// tab area bounds
-				int tx = (tabPlacement == LEFT)
+				tr.x = (tabPlacement == LEFT)
 					? insets.left + tabAreaInsets.left
-					: (bounds.width - insets.right - tabAreaInsets.right - tabAreaWidth);
-				int ty = insets.top;
-				int tw = tabAreaWidth;
-				int th = bounds.height - insets.top - insets.bottom;
-
-				int topHeight = getLeadingPreferredHeight();
-				int bottomHeight = getTrailingPreferredHeight();
-
-				// apply tab area alignment
-				if( runCount == 1 && rects.length > 0 ) {
-					int availHeight = th - topHeight - bottomHeight - tabAreaInsets.top - tabAreaInsets.bottom;
-					int totalTabHeight = rectsTotalHeight();
-					int diff = availHeight - totalTabHeight;
-
-					switch( tabAreaAlignment ) {
-						case LEADING:
-							bottomHeight += diff;
-							break;
-
-						case TRAILING:
-							shiftTabs( 0, diff );
-							topHeight += diff;
-							break;
-
-						case CENTER:
-							shiftTabs( 0, (diff) / 2 );
-							topHeight += diff / 2;
-							bottomHeight += diff - (diff / 2);
-							break;
-
-						case FILL:
-							stretchTabsHeight( diff );
-							break;
-					}
-				} else if( rects.length == 0 )
-					bottomHeight = th - topHeight;
-
-				// layout top component
-				if( leadingComponent != null )
-					leadingComponent.setBounds( tx, ty, tw, topHeight );
-
-				// layout bottom component
-				if( trailingComponent != null )
-					trailingComponent.setBounds( tx, ty + th - bottomHeight, tw, bottomHeight );
+					: (tabPaneWidth - insets.right - tabAreaInsets.right - tabAreaWidth);
+				tr.y = insets.top;
+				tr.width = tabAreaWidth;
+				tr.height = tabPaneHeight - insets.top - insets.bottom;
 			}
+			return tr;
+		}
+
+		Rectangle layoutLeftAndRightComponents( Rectangle tr, int tabAreaAlignment, Insets tabAreaInsets,
+			boolean useTabAreaAlignment, boolean shiftTabs, boolean leftToRight )
+		{
+			int leadingWidth = getLeadingPreferredWidth();
+			int trailingWidth = getTrailingPreferredWidth();
+
+			// apply tab area alignment
+			if( useTabAreaAlignment && rects.length > 0 ) {
+				int availWidth = tr.width - leadingWidth - trailingWidth - tabAreaInsets.left - tabAreaInsets.right;
+				int totalTabWidth = rectsTotalWidth( leftToRight );
+				int diff = availWidth - totalTabWidth;
+
+				switch( tabAreaAlignment ) {
+					case LEADING:
+						trailingWidth += diff;
+						break;
+
+					case TRAILING:
+						if( shiftTabs )
+							shiftTabs( leftToRight ? diff : -diff, 0 );
+						leadingWidth += diff;
+						break;
+
+					case CENTER:
+						if( shiftTabs )
+							shiftTabs( (leftToRight ? diff : -diff) / 2, 0 );
+						leadingWidth += diff / 2;
+						trailingWidth += diff - (diff / 2);
+						break;
+
+					case FILL:
+						stretchTabsWidth( diff, leftToRight );
+						break;
+				}
+			} else if( rects.length == 0 )
+				trailingWidth = tr.width - leadingWidth;
+
+			// layout left component
+			Container leftComponent = leftToRight ? leadingComponent : trailingComponent;
+			int leftWidth = leftToRight ? leadingWidth : trailingWidth;
+			if( leftComponent != null )
+				leftComponent.setBounds( tr.x, tr.y, leftWidth, tr.height );
+
+			// layout right component
+			Container rightComponent = leftToRight ? trailingComponent : leadingComponent;
+			int rightWidth = leftToRight ? trailingWidth : leadingWidth;
+			if( rightComponent != null )
+				rightComponent.setBounds( tr.x + tr.width - rightWidth, tr.y, rightWidth, tr.height );
+
+			// return new tab area bounds reduced by left/right components and applied tab area alignment
+			Rectangle r = new Rectangle( tr );
+			r.x += leftWidth;
+			r.width -= leftWidth + rightWidth;
+			return r;
+		}
+
+		Rectangle layoutTopAndBottomComponents( Rectangle tr, int tabAreaAlignment, Insets tabAreaInsets,
+			boolean useTabAreaAlignment, boolean shiftTabs )
+		{
+			int topHeight = getLeadingPreferredHeight();
+			int bottomHeight = getTrailingPreferredHeight();
+
+			// apply tab area alignment
+			if( useTabAreaAlignment && rects.length > 0 ) {
+				int availHeight = tr.height - topHeight - bottomHeight - tabAreaInsets.top - tabAreaInsets.bottom;
+				int totalTabHeight = rectsTotalHeight();
+				int diff = availHeight - totalTabHeight;
+
+				switch( tabAreaAlignment ) {
+					case LEADING:
+						bottomHeight += diff;
+						break;
+
+					case TRAILING:
+						if( shiftTabs )
+							shiftTabs( 0, diff );
+						topHeight += diff;
+						break;
+
+					case CENTER:
+						if( shiftTabs )
+							shiftTabs( 0, diff / 2 );
+						topHeight += diff / 2;
+						bottomHeight += diff - (diff / 2);
+						break;
+
+					case FILL:
+						stretchTabsHeight( diff );
+						break;
+				}
+			} else if( rects.length == 0 )
+				bottomHeight = tr.height - topHeight;
+
+			// layout top component
+			if( leadingComponent != null )
+				leadingComponent.setBounds( tr.x, tr.y, tr.width, topHeight );
+
+			// layout bottom component
+			if( trailingComponent != null )
+				trailingComponent.setBounds( tr.x, tr.y + tr.height - bottomHeight, tr.width, bottomHeight );
+
+			// return new tab area bounds reduced by top/bottom components and applied tab area alignment
+			Rectangle r = new Rectangle( tr );
+			r.y += topHeight;
+			r.height -= topHeight + bottomHeight;
+			return r;
 		}
 	}
 
@@ -2605,7 +3682,32 @@ public class FlatTabbedPaneUI
 	/**
 	 * Layout manager used for scroll tab layout policy.
 	 * <p>
-	 * Although this class delegates all methods to the original layout manager
+	 * Component hierarchy for scroll tab layout policy:
+	 * <pre>{@code
+	 * JTabbedPane
+	 *    +- 1...n tab content components
+	 *    +- BasicTabbedPaneUI.ScrollableTabViewport (extends JViewport)
+	 *    |  +- BasicTabbedPaneUI.ScrollableTabPanel (extends JPanel)
+	 *    |     +- (optional) BasicTabbedPaneUI.TabContainer (extends JPanel)
+	 *    |        +- 1..n tab components (shown in tab area)
+	 *    +- FlatScrollableTabButton (scroll forward)
+	 *    +- FlatScrollableTabButton (scroll backward)
+	 *    +- FlatMoreTabsButton
+	 *    +- (optional) ContainerUIResource (extends JPanel)
+	 *    |  +- leading component
+	 *    +- (optional) ContainerUIResource (extends JPanel)
+	 *       +- trailing component
+	 * }</pre>
+	 * <p>
+	 * Instead of using {@code super.layoutContainer(Container)} and fixing some
+	 * component bounds, this class implements {@code layoutContainer(Container)}
+	 * and moves/resizes components only once.
+	 * This avoids that some components are moved/resized twice, which would unnecessary
+	 * repaint and relayout tabbed pane. In some special case this resulted in
+	 * "endless" layouting and repainting when using nested tabbed panes (top and
+	 * bottom tab placement) and RSyntaxTextArea (with enabled line-wrapping) as tab content.
+	 * <p>
+	 * Although this class delegates nearly all methods to the original layout manager
 	 * {@code BasicTabbedPaneUI.TabbedPaneScrollLayout}, which extends
 	 * {@link BasicTabbedPaneUI.TabbedPaneLayout}, it is necessary that this class
 	 * also extends {@link TabbedPaneLayout} to avoid a {@code ClassCastException}
@@ -2631,7 +3733,7 @@ public class FlatTabbedPaneUI
 			Dimension size = super.calculateTabAreaSize();
 
 			// limit width/height in scroll layout
-			if( isHorizontalTabPlacement() )
+			if( isHorizontalTabPlacement( tabPane.getTabPlacement() ) )
 				size.width = Math.min( size.width, scale( 100 ) );
 			else
 				size.height = Math.min( size.height, scale( 100 ) );
@@ -2666,15 +3768,11 @@ public class FlatTabbedPaneUI
 			delegate.removeLayoutComponent( comp );
 		}
 
+		/** @since 3.3 */
 		@Override
-		public void layoutContainer( Container parent ) {
-			// delegate to original layout manager and let it layout tabs and buttons
-			//
-			// runWithOriginalLayoutManager() is necessary for correct locations
-			// of tab components layed out in TabbedPaneLayout.layoutTabComponents()
-			runWithOriginalLayoutManager( () -> {
-				delegate.layoutContainer( parent );
-			} );
+		protected void layoutContainerImpl() {
+			// layout content area components
+			layoutChildComponents();
 
 			int tabsPopupPolicy = getTabsPopupPolicy();
 			int scrollButtonsPolicy = getScrollButtonsPolicy();
@@ -2685,11 +3783,22 @@ public class FlatTabbedPaneUI
 			boolean hideDisabledScrollButtons = (scrollButtonsPolicy == AS_NEEDED_SINGLE && scrollButtonsPlacement == BOTH);
 			boolean trailingScrollButtons = (scrollButtonsPlacement == TRAILING);
 
-			// for right-to-left always use "more tabs" button for horizontal scrolling
+			// For right-to-left, always use "more tabs" button for horizontal scrolling
 			// because methods scrollForward() and scrollBackward() in class
-			// BasicTabbedPaneUI.ScrollableTabSupport do not work for right-to-left
+			// BasicTabbedPaneUI.ScrollableTabSupport do not work for right-to-left.
+			//
+			// One problem is that BasicTabbedPaneUI.getClosestTab(), which is used
+			// to compute leadingTabIndex, does not work for right-to-left because is uses "binary" search
+			// on rects[] to find tab, but rects[] is ordered in reverse order for right-to-left.
+			// So leadingTabIndex is either zero or tabCount.
+			// Therefore increasing/decreasing leadingTabIndex in scrollForward()
+			// and scrollBackward() does not work as expected.
+			// Also backward/forward scroll buttons are not correctly enabled/disabled.
+			//
+			// Fixing this would require replacing nearly whole functionality of class
+			// BasicTabbedPaneUI.ScrollableTabSupport, which is not possible because it is private.
 			boolean leftToRight = isLeftToRight();
-			if( !leftToRight && isHorizontalTabPlacement() ) {
+			if( !leftToRight && isHorizontalTabPlacement( tabPane.getTabPlacement() ) ) {
 				useMoreTabsButton = true;
 				useScrollButtons = false;
 			}
@@ -2710,8 +3819,6 @@ public class FlatTabbedPaneUI
 			if( backwardButton == null || forwardButton == null )
 				return; // should never occur
 
-			Rectangle bounds = tabPane.getBounds();
-			Insets insets = tabPane.getInsets();
 			int tabPlacement = tabPane.getTabPlacement();
 			int tabAreaAlignment = getTabAreaAlignment();
 			Insets tabAreaInsets = getRealTabAreaInsets( tabPlacement );
@@ -2734,6 +3841,9 @@ public class FlatTabbedPaneUI
 					viewSize.height - (horizontal ? 0 : tabAreaInsets.top) ) );
 			}
 
+			// tab area bounds
+			Rectangle tr = getTabAreaLayoutBounds( tabPlacement, tabAreaInsets );
+
 			// layout tab area
 			if( tabPlacement == TOP || tabPlacement == BOTTOM ) {
 				// avoid that tab area "jump" to the right when backward button becomes hidden
@@ -2743,71 +3853,19 @@ public class FlatTabbedPaneUI
 						tabViewport.setViewPosition( new Point( 0, viewPosition.y ) );
 				}
 
-				// tab area height (maxTabHeight is zero if tab count is zero)
-				int tabAreaHeight = (maxTabHeight > 0)
-					? maxTabHeight
-					: Math.max(
-						Math.max( getLeadingPreferredHeight(), getTrailingPreferredHeight() ),
-						scale( clientPropertyInt( tabPane, TABBED_PANE_TAB_HEIGHT, tabHeight ) ) );
-
-				// tab area bounds
-				int tx = insets.left;
-				int ty = (tabPlacement == TOP)
-					? insets.top + tabAreaInsets.top
-					: (bounds.height - insets.bottom - tabAreaInsets.bottom - tabAreaHeight);
-				int tw = bounds.width - insets.left - insets.right;
-				int th = tabAreaHeight;
-
-				int leadingWidth = getLeadingPreferredWidth();
-				int trailingWidth = getTrailingPreferredWidth();
-				int availWidth = tw - leadingWidth - trailingWidth - tabAreaInsets.left - tabAreaInsets.right;
+				int availWidth = tr.width - getLeadingPreferredWidth() - getTrailingPreferredWidth() - tabAreaInsets.left - tabAreaInsets.right;
 				int totalTabWidth = (rects.length > 0) ? rectsTotalWidth( leftToRight ) : 0;
 
-				// apply tab area alignment
-				if( totalTabWidth < availWidth && rects.length > 0 ) {
-					int diff = availWidth - totalTabWidth;
-					switch( tabAreaAlignment ) {
-						case LEADING:
-							trailingWidth += diff;
-							break;
-
-						case TRAILING:
-							leadingWidth += diff;
-							break;
-
-						case CENTER:
-							leadingWidth += diff / 2;
-							trailingWidth += diff - (diff / 2);
-							break;
-
-						case FILL:
-							stretchTabsWidth( diff, leftToRight );
-							totalTabWidth = rectsTotalWidth( leftToRight );
-							break;
-					}
-				} else if( rects.length == 0 )
-					trailingWidth = tw - leadingWidth;
-
-				// layout left component
-				Container leftComponent = leftToRight ? leadingComponent : trailingComponent;
-				int leftWidth = leftToRight ? leadingWidth : trailingWidth;
-				if( leftComponent != null )
-					leftComponent.setBounds( tx, ty, leftWidth, th );
-
-				// layout right component
-				Container rightComponent = leftToRight ? trailingComponent : leadingComponent;
-				int rightWidth = leftToRight ? trailingWidth : leadingWidth;
-				if( rightComponent != null )
-					rightComponent.setBounds( tx + tw - rightWidth, ty, rightWidth, th );
+				// layout left and right components
+				boolean useTabAreaAlignment = (totalTabWidth < availWidth);
+				Rectangle tr2 = layoutLeftAndRightComponents( tr, tabAreaAlignment, tabAreaInsets, useTabAreaAlignment, false, leftToRight );
 
 				// layout tab viewport and buttons
 				if( rects.length > 0 ) {
-					int txi = tx + leftWidth + (leftToRight ? tabAreaInsets.left : tabAreaInsets.right);
-					int twi = tw - leftWidth - rightWidth - tabAreaInsets.left - tabAreaInsets.right;
-
-					// layout viewport and buttons
-					int x = txi;
-					int w = twi;
+					int x = tr2.x + (leftToRight ? tabAreaInsets.left : tabAreaInsets.right);
+					int w = tr2.width - tabAreaInsets.left - tabAreaInsets.right;
+					int y = tr2.y;
+					int h = tr2.height;
 
 					if( w < totalTabWidth ) {
 						// available width is too small for all tabs --> need buttons
@@ -2815,32 +3873,38 @@ public class FlatTabbedPaneUI
 						// layout more button on trailing side
 						if( useMoreTabsButton ) {
 							int buttonWidth = moreTabsButton.getPreferredSize().width;
-							moreTabsButton.setBounds( leftToRight ? (x + w - buttonWidth) : x, ty, buttonWidth, th );
+							moreTabsButton.setBounds( leftToRight ? (x + w - buttonWidth) : x, y, buttonWidth, h );
 							x += leftToRight ? 0 : buttonWidth;
 							w -= buttonWidth;
 							moreTabsButtonVisible = true;
 						}
+
+						// layout scroll buttons
 						if( useScrollButtons ) {
+							// the tabViewport view size is set in
+							// BasicTabbedPaneUI.TabbedPaneScrollLayout.calculateTabRects(),
+							// which is called from calculateLayoutInfo()
+							Point viewPosition = tabViewport.getViewPosition();
+							Dimension viewSize = tabViewport.getViewSize();
+
 							// layout forward button on trailing side
-							if( !hideDisabledScrollButtons || forwardButton.isEnabled() ) {
+							if( !hideDisabledScrollButtons || viewSize.width - viewPosition.x > w ) {
 								int buttonWidth = forwardButton.getPreferredSize().width;
-								forwardButton.setBounds( leftToRight ? (x + w - buttonWidth) : x, ty, buttonWidth, th );
-								x += leftToRight ? 0 : buttonWidth;
+								forwardButton.setBounds( x + w - buttonWidth, y, buttonWidth, h );
 								w -= buttonWidth;
 								forwardButtonVisible = true;
 							}
 
 							// layout backward button
-							if( !hideDisabledScrollButtons || backwardButton.isEnabled() ) {
+							if( !hideDisabledScrollButtons || viewPosition.x > 0 ) {
 								int buttonWidth = backwardButton.getPreferredSize().width;
 								if( trailingScrollButtons ) {
 									// on trailing side
-									backwardButton.setBounds( leftToRight ? (x + w - buttonWidth) : x, ty, buttonWidth, th );
-									x += leftToRight ? 0 : buttonWidth;
+									backwardButton.setBounds( x + w - buttonWidth, y, buttonWidth, h );
 								} else {
 									// on leading side
-									backwardButton.setBounds( leftToRight ? x : (x + w - buttonWidth), ty, buttonWidth, th );
-									x += leftToRight ? buttonWidth : 0;
+									backwardButton.setBounds( x, y, buttonWidth, h );
+									x += buttonWidth;
 								}
 								w -= buttonWidth;
 								backwardButtonVisible = true;
@@ -2848,7 +3912,7 @@ public class FlatTabbedPaneUI
 						}
 					}
 
-					tabViewport.setBounds( x, ty, w, th );
+					tabViewport.setBounds( x, y, w, h );
 
 					if( !leftToRight ) {
 						// layout viewport so that we can get correct view width below
@@ -2866,65 +3930,19 @@ public class FlatTabbedPaneUI
 						tabViewport.setViewPosition( new Point( viewPosition.x, 0 ) );
 				}
 
-				// tab area width (maxTabWidth is zero if tab count is zero)
-				int tabAreaWidth = (maxTabWidth > 0)
-					? maxTabWidth
-					: Math.max( getLeadingPreferredWidth(), getTrailingPreferredWidth() );
-
-				// tab area bounds
-				int tx = (tabPlacement == LEFT)
-					? insets.left + tabAreaInsets.left
-					: (bounds.width - insets.right - tabAreaInsets.right - tabAreaWidth);
-				int ty = insets.top;
-				int tw = tabAreaWidth;
-				int th = bounds.height - insets.top - insets.bottom;
-
-				int topHeight = getLeadingPreferredHeight();
-				int bottomHeight = getTrailingPreferredHeight();
-				int availHeight = th - topHeight - bottomHeight - tabAreaInsets.top - tabAreaInsets.bottom;
+				int availHeight = tr.height - getLeadingPreferredHeight() - getTrailingPreferredHeight() - tabAreaInsets.top - tabAreaInsets.bottom;
 				int totalTabHeight = (rects.length > 0) ? rectsTotalHeight() : 0;
 
-				// apply tab area alignment
-				if( totalTabHeight < availHeight && rects.length > 0 ) {
-					int diff = availHeight - totalTabHeight;
-					switch( tabAreaAlignment ) {
-						case LEADING:
-							bottomHeight += diff;
-							break;
-
-						case TRAILING:
-							topHeight += diff;
-							break;
-
-						case CENTER:
-							topHeight += diff / 2;
-							bottomHeight += diff - (diff / 2);
-							break;
-
-						case FILL:
-							stretchTabsHeight( diff );
-							totalTabHeight = rectsTotalHeight();
-							break;
-					}
-				} else if( rects.length == 0 )
-					bottomHeight = th - topHeight;
-
-				// layout top component
-				if( leadingComponent != null )
-					leadingComponent.setBounds( tx, ty, tw, topHeight );
-
-				// layout bottom component
-				if( trailingComponent != null )
-					trailingComponent.setBounds( tx, ty + th - bottomHeight, tw, bottomHeight );
+				// layout top and bottom components
+				boolean useTabAreaAlignment = (totalTabHeight < availHeight);
+				Rectangle tr2 = layoutTopAndBottomComponents( tr, tabAreaAlignment, tabAreaInsets, useTabAreaAlignment, false );
 
 				// layout tab viewport and buttons
 				if( rects.length > 0 ) {
-					int tyi = ty + topHeight + tabAreaInsets.top;
-					int thi = th - topHeight - bottomHeight - tabAreaInsets.top - tabAreaInsets.bottom;
-
-					// layout viewport and buttons
-					int y = tyi;
-					int h = thi;
+					int y = tr2.y + tabAreaInsets.top;
+					int h = tr2.height - tabAreaInsets.top - tabAreaInsets.bottom;
+					int x = tr2.x;
+					int w = tr2.width;
 
 					if( h < totalTabHeight ) {
 						// available height is too small for all tabs --> need buttons
@@ -2932,28 +3950,36 @@ public class FlatTabbedPaneUI
 						// layout more button on bottom side
 						if( useMoreTabsButton ) {
 							int buttonHeight = moreTabsButton.getPreferredSize().height;
-							moreTabsButton.setBounds( tx, y + h - buttonHeight, tw, buttonHeight );
+							moreTabsButton.setBounds( x, y + h - buttonHeight, w, buttonHeight );
 							h -= buttonHeight;
 							moreTabsButtonVisible = true;
 						}
+
+						// layout scroll buttons
 						if( useScrollButtons ) {
+							// the tabViewport view size is set in
+							// BasicTabbedPaneUI.TabbedPaneScrollLayout.calculateTabRects(),
+							// which is called from calculateLayoutInfo()
+							Point viewPosition = tabViewport.getViewPosition();
+							Dimension viewSize = tabViewport.getViewSize();
+
 							// layout forward button on bottom side
-							if( !hideDisabledScrollButtons || forwardButton.isEnabled() ) {
+							if( !hideDisabledScrollButtons || viewSize.height - viewPosition.y > h ) {
 								int buttonHeight = forwardButton.getPreferredSize().height;
-								forwardButton.setBounds( tx, y + h - buttonHeight, tw, buttonHeight );
+								forwardButton.setBounds( x, y + h - buttonHeight, w, buttonHeight );
 								h -= buttonHeight;
 								forwardButtonVisible = true;
 							}
 
 							// layout backward button
-							if( !hideDisabledScrollButtons || backwardButton.isEnabled() ) {
+							if( !hideDisabledScrollButtons || viewPosition.y > 0 ) {
 								int buttonHeight = backwardButton.getPreferredSize().height;
 								if( trailingScrollButtons ) {
 									// on bottom side
-									backwardButton.setBounds( tx, y + h - buttonHeight, tw, buttonHeight );
+									backwardButton.setBounds( x, y + h - buttonHeight, w, buttonHeight );
 								} else {
 									// on top side
-									backwardButton.setBounds( tx, y, tw, buttonHeight );
+									backwardButton.setBounds( x, y, w, buttonHeight );
 									y += buttonHeight;
 								}
 								h -= buttonHeight;
@@ -2962,7 +3988,18 @@ public class FlatTabbedPaneUI
 						}
 					}
 
-					tabViewport.setBounds( tx, y, tw, h );
+					tabViewport.setBounds( x, y, w, h );
+				}
+			}
+
+			// layout tab components in tab container
+			Component view = tabViewport.getView();
+			if( view instanceof Container && ((Container)view).getComponentCount() > 0 ) {
+				for( Component c : ((Container)view).getComponents() ) {
+					if( isTabContainer( c ) ) {
+						layoutTabComponents( c );
+						break;
+					}
 				}
 			}
 
@@ -2974,15 +4011,22 @@ public class FlatTabbedPaneUI
 
 			scrollBackwardButtonPrefSize = backwardButton.getPreferredSize();
 		}
+
+		/** @since 3.3 */
+		@Override
+		protected void layoutChildComponent( Component c, Rectangle contentAreaBounds ) {
+			if( c == tabViewport || c instanceof FlatTabAreaButton || c == leadingComponent || c == trailingComponent )
+				return;
+
+			c.setBounds( contentAreaBounds );
+		}
 	}
 
 	//---- class RunWithOriginalLayoutManagerDelegateAction -------------------
 
 	private static class RunWithOriginalLayoutManagerDelegateAction
-		implements Action
+		extends FlatUIAction
 	{
-		private final Action delegate;
-
 		static void install( ActionMap map, String key ) {
 			Action oldAction = map.get( key );
 			if( oldAction == null || oldAction instanceof RunWithOriginalLayoutManagerDelegateAction )
@@ -2992,23 +4036,8 @@ public class FlatTabbedPaneUI
 		}
 
 		private RunWithOriginalLayoutManagerDelegateAction( Action delegate ) {
-			this.delegate = delegate;
+			super( delegate );
 		}
-
-		@Override
-		public Object getValue( String key ) {
-			return delegate.getValue( key );
-		}
-
-		@Override
-		public boolean isEnabled() {
-			return delegate.isEnabled();
-		}
-
-		@Override public void putValue( String key, Object value ) {}
-		@Override public void setEnabled( boolean b ) {}
-		@Override public void addPropertyChangeListener( PropertyChangeListener listener ) {}
-		@Override public void removePropertyChangeListener( PropertyChangeListener listener ) {}
 
 		@Override
 		public void actionPerformed( ActionEvent e ) {
@@ -3020,6 +4049,93 @@ public class FlatTabbedPaneUI
 				} );
 			} else
 				delegate.actionPerformed( e );
+		}
+	}
+
+	//---- class FlatSelectedTabRepainter -------------------------------------
+
+	private static class FlatSelectedTabRepainter
+		implements PropertyChangeListener
+	{
+		private static FlatSelectedTabRepainter instance;
+
+		private KeyboardFocusManager keyboardFocusManager;
+
+		static void install() {
+			synchronized( FlatSelectedTabRepainter.class ) {
+				if( instance != null )
+					return;
+
+				instance = new FlatSelectedTabRepainter();
+			}
+		}
+
+		FlatSelectedTabRepainter() {
+			keyboardFocusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+			keyboardFocusManager.addPropertyChangeListener( this );
+		}
+
+		private void uninstall() {
+			synchronized( FlatSelectedTabRepainter.class ) {
+				if( instance == null )
+					return;
+
+				keyboardFocusManager.removePropertyChangeListener( this );
+				keyboardFocusManager = null;
+				instance = null;
+			}
+		}
+
+		@Override
+		public void propertyChange( PropertyChangeEvent e ) {
+			// uninstall if no longer using FlatLaf
+			if( !(UIManager.getLookAndFeel() instanceof FlatLaf) ) {
+				uninstall();
+				return;
+			}
+
+			switch( e.getPropertyName() ) {
+				case "permanentFocusOwner":
+					Object oldValue = e.getOldValue();
+					Object newValue = e.getNewValue();
+					if( oldValue instanceof Component )
+						repaintSelectedTabs( (Component) oldValue );
+					if( newValue instanceof Component )
+						repaintSelectedTabs( (Component) newValue );
+					break;
+
+				case "activeWindow":
+					Component permanentFocusOwner = keyboardFocusManager.getPermanentFocusOwner();
+					if( permanentFocusOwner != null )
+						repaintSelectedTabs( permanentFocusOwner );
+					break;
+			}
+		}
+
+		private void repaintSelectedTabs( Component c ) {
+			// Use invokeLater because this method may be invoked while UI update
+			// is in progress. This may happen if a focusable component (e.g. text field)
+			// is used as tab component (see JTabbedPane.setTabComponentAt()).
+			// uninstallTabContainer() removes all components from tabbed pane and
+			// the text field looses focus.
+			EventQueue.invokeLater( () -> {
+				// because this is invoked later, check whether component is still displayable
+				if( !c.isDisplayable() )
+					return;
+
+				if( c instanceof JTabbedPane )
+					repaintSelectedTab( (JTabbedPane) c );
+
+				Component c2 = c;
+				while( (c2 = SwingUtilities.getAncestorOfClass( JTabbedPane.class, c2 )) != null )
+					repaintSelectedTab( (JTabbedPane) c2 );
+			} );
+		}
+
+		private void repaintSelectedTab( JTabbedPane tabbedPane ) {
+			TabbedPaneUI ui = tabbedPane.getUI();
+			if( ui instanceof FlatTabbedPaneUI )
+				((FlatTabbedPaneUI) ui).repaintTab( tabbedPane.getSelectedIndex() );
 		}
 	}
 }

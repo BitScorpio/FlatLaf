@@ -19,6 +19,7 @@ package com.formdev.flatlaf.extras;
 import java.awt.AlphaComposite;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.image.VolatileImage;
 import java.util.Map;
@@ -51,9 +52,9 @@ public class FlatAnimatedLafChange
 	public static int duration = 160;
 
 	/**
-	 * The resolution of the animation in milliseconds. Default is 40 ms.
+	 * The resolution of the animation in milliseconds. Default is 30 ms.
 	 */
-	public static int resolution = 40;
+	public static int resolution = 30;
 
 	private static Animator animator;
 	private static final Map<JLayeredPane, JComponent> oldUIsnapshots = new WeakHashMap<>();
@@ -132,8 +133,8 @@ public class FlatAnimatedLafChange
 	}
 
 	/**
-	 * Starts an animation that shows the snapshot (created by {@link #showSnapshot()}
-	 * with an decreasing alpha. At the end, the snapshot is removed and the new UI is shown.
+	 * Starts an animation that shows the snapshot (created by {@link #showSnapshot()})
+	 * with a decreasing alpha. At the end, the snapshot is removed and the new UI is shown.
 	 * Invoke after updating UI.
 	 */
 	public static void hideSnapshotWithAnimation() {
@@ -158,6 +159,8 @@ public class FlatAnimatedLafChange
 				if( e.getKey().isShowing() )
 					e.getValue().repaint();
 			}
+
+			Toolkit.getDefaultToolkit().sync();
 		}, () -> {
 			hideSnapshot();
 			animator = null;

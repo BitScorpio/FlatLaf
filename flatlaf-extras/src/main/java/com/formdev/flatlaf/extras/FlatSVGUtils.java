@@ -16,18 +16,19 @@
 
 package com.formdev.flatlaf.extras;
 
+import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Image;
-import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
-import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import javax.swing.JWindow;
-import com.kitfox.svg.SVGCache;
-import com.kitfox.svg.SVGDiagram;
-import com.kitfox.svg.SVGException;
+import com.formdev.flatlaf.util.MultiResolutionImageSupport;
+import com.formdev.flatlaf.util.SystemInfo;
+import com.github.weisj.jsvg.SVGDocument;
+import com.github.weisj.jsvg.geometry.size.FloatSize;
 
 /**
  * Utility methods for SVG.
@@ -40,26 +41,86 @@ public class FlatSVGUtils
 	 * Creates from the given SVG a list of icon images with different sizes that
 	 * can be used for windows headers. The SVG should have a size of 16x16,
 	 * otherwise it is scaled.
+	 * <p>
+	 * If running on Windows in Java 9 or later and multi-resolution image support is available,
+	 * then a single multi-resolution image is returned that creates images on demand
+	 * for requested sizes from SVG.
+	 * This has the advantage that only images for used sizes are created.
+	 * Also, if unusual sizes are requested (e.g. 18x18), then they are created from SVG.
+	 * <p>
+	 * If using Java modules, the package containing the SVG must be opened in {@code module-info.java}.
+	 * Otherwise, use {@link #createWindowIconImages(URL)}.
 	 *
 	 * @param svgName the name of the SVG resource (a '/'-separated path)
-	 * @return list of icon images with different sizes (16x16, 24x24, 32x32, 48x48 and 64x64)
+	 * @return list of icon images with different sizes (16x16, 20x20, 24x24, 28x28, 32x32, 48x48 and 64x64)
 	 * @throws RuntimeException if failed to load or render SVG file
 	 * @see JWindow#setIconImages(List)
 	 */
 	public static List<Image> createWindowIconImages( String svgName ) {
-		SVGDiagram diagram = loadSVG( svgName );
+		return createWindowIconImages( getResource( svgName ) );
+	}
 
-		return Arrays.asList(
-			svg2image( diagram, 16, 16 ),
-			svg2image( diagram, 24, 24 ),
-			svg2image( diagram, 32, 32 ),
-			svg2image( diagram, 48, 48 ),
-			svg2image( diagram, 64, 64 )
-		);
+	/**
+	 * Creates from the given SVG a list of icon images with different sizes that
+	 * can be used for windows headers. The SVG should have a size of 16x16,
+	 * otherwise it is scaled.
+	 * <p>
+	 * If running on Windows in Java 9 or later and multi-resolution image support is available,
+	 * then a single multi-resolution image is returned that creates images on demand
+	 * for requested sizes from SVG.
+	 * This has the advantage that only images for used sizes are created.
+	 * Also, if unusual sizes are requested (e.g. 18x18), then they are created from SVG.
+	 * <p>
+	 * This method is useful if using Java modules and the package containing the SVG
+	 * is not opened in {@code module-info.java}.
+	 * E.g. {@code createWindowIconImages( getClass().getResource( "/com/myapp/myicon.svg" ) )}.
+	 *
+	 * @param svgUrl the URL of the SVG resource
+	 * @return list of icon images with different sizes (16x16, 20x20, 24x24, 28x28, 32x32, 48x48 and 64x64)
+	 * @throws RuntimeException if failed to load or render SVG file
+	 * @see JWindow#setIconImages(List)
+	 * @since 2
+	 */
+	public static List<Image> createWindowIconImages( URL svgUrl ) {
+		SVGDocument document = FlatSVGIcon.loadSVG( svgUrl );
+
+		if( SystemInfo.isWindows && MultiResolutionImageSupport.isAvailable() ) {
+			// use a multi-resolution image that creates images on demand for requested sizes
+			return Collections.singletonList( MultiResolutionImageSupport.create( 0,
+				new Dimension[] {
+					// Listing all these sizes here is actually not necessary because
+					// any size is created on demand when
+					// MultiResolutionImage.getResolutionVariant(double destImageWidth, double destImageHeight)
+					// is invoked.
+					// These sizes are only used by MultiResolutionImage.getResolutionVariants().
+					new Dimension( 16, 16 ),	// 100%
+					new Dimension( 20, 20 ),	// 125%
+					new Dimension( 24, 24 ),	// 150%
+					new Dimension( 28, 28 ),	// 175%
+					new Dimension( 32, 32 ),	// 200%
+					new Dimension( 48, 48 ),	// 300%
+					new Dimension( 64, 64 ),	// 400%
+			}, dim -> {
+				return svg2image( document, dim.width, dim.height );
+			} ) );
+		} else {
+			return Arrays.asList(
+				svg2image( document, 16, 16 ),	// 100%
+				svg2image( document, 20, 20 ),	// 125%
+				svg2image( document, 24, 24 ),	// 150%
+				svg2image( document, 28, 28 ),	// 175%
+				svg2image( document, 32, 32 ),	// 200%
+				svg2image( document, 48, 48 ),	// 300%
+				svg2image( document, 64, 64 )	// 400%
+			);
+		}
 	}
 
 	/**
 	 * Creates a buffered image and renders the given SVG into it.
+	 * <p>
+	 * If using Java modules, the package containing the SVG must be opened in {@code module-info.java}.
+	 * Otherwise, use {@link #svg2image(URL, int, int)}.
 	 *
 	 * @param svgName the name of the SVG resource (a '/'-separated path)
 	 * @param width the width of the image
@@ -68,11 +129,32 @@ public class FlatSVGUtils
 	 * @throws RuntimeException if failed to load or render SVG file
 	 */
 	public static BufferedImage svg2image( String svgName, int width, int height ) {
-		return svg2image( loadSVG( svgName ), width, height );
+		return svg2image( getResource( svgName ), width, height );
 	}
 
 	/**
 	 * Creates a buffered image and renders the given SVG into it.
+	 * <p>
+	 * This method is useful if using Java modules and the package containing the SVG
+	 * is not opened in {@code module-info.java}.
+	 * E.g. {@code svg2image( getClass().getResource( "/com/myapp/myicon.svg" ), 24, 24 )}.
+	 *
+	 * @param svgUrl the URL of the SVG resource
+	 * @param width the width of the image
+	 * @param height the height of the image
+	 * @return the image
+	 * @throws RuntimeException if failed to load or render SVG file
+	 * @since 2
+	 */
+	public static BufferedImage svg2image( URL svgUrl, int width, int height ) {
+		return svg2image( FlatSVGIcon.loadSVG( svgUrl ), width, height );
+	}
+
+	/**
+	 * Creates a buffered image and renders the given SVG into it.
+	 * <p>
+	 * If using Java modules, the package containing the SVG must be opened in {@code module-info.java}.
+	 * Otherwise, use {@link #svg2image(URL, float)}.
 	 *
 	 * @param svgName the name of the SVG resource (a '/'-separated path)
 	 * @param scaleFactor the amount by which the SVG size is scaled
@@ -80,61 +162,60 @@ public class FlatSVGUtils
 	 * @throws RuntimeException if failed to load or render SVG file
 	 */
 	public static BufferedImage svg2image( String svgName, float scaleFactor ) {
-		SVGDiagram diagram = loadSVG( svgName );
-		int width = (int) (diagram.getWidth() * scaleFactor);
-		int height = (int) (diagram.getHeight() * scaleFactor);
-		return svg2image( diagram, width, height );
+		return svg2image( getResource( svgName ), scaleFactor );
 	}
 
 	/**
-	 * Creates a buffered image and renders the given SVGDiagram into it.
+	 * Creates a buffered image and renders the given SVG into it.
+	 * <p>
+	 * This method is useful if using Java modules and the package containing the SVG
+	 * is not opened in {@code module-info.java}.
+	 * E.g. {@code svg2image( getClass().getResource( "/com/myapp/myicon.svg" ), 1.5f )}.
 	 *
-	 * @param diagram the SVG diagram
+	 * @param svgUrl the URL of the SVG resource
+	 * @param scaleFactor the amount by which the SVG size is scaled
+	 * @return the image
+	 * @throws RuntimeException if failed to load or render SVG file
+	 * @since 2
+	 */
+	public static BufferedImage svg2image( URL svgUrl, float scaleFactor ) {
+		SVGDocument document = FlatSVGIcon.loadSVG( svgUrl );
+		FloatSize size = document.size();
+		int width = (int) (size.width * scaleFactor);
+		int height = (int) (size.height * scaleFactor);
+		return svg2image( document, width, height );
+	}
+
+	/**
+	 * Creates a buffered image and renders the given SVGDocument into it.
+	 *
+	 * @param document the SVG document
 	 * @param width the width of the image
 	 * @param height the height of the image
 	 * @return the image
 	 * @throws RuntimeException if failed to render SVG file
 	 */
-	public static BufferedImage svg2image( SVGDiagram diagram, int width, int height ) {
+	private static BufferedImage svg2image( SVGDocument document, int width, int height ) {
+		BufferedImage image = new BufferedImage( width, height, BufferedImage.TYPE_INT_ARGB );
+
+		Graphics2D g = image.createGraphics();
 		try {
-			BufferedImage image = new BufferedImage( width, height, BufferedImage.TYPE_INT_ARGB );
+			FlatSVGIcon.setRenderingHints( g );
 
-			Graphics2D g = image.createGraphics();
-			try {
-				g.setRenderingHint( RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON );
-				g.setRenderingHint( RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR );
+			FloatSize size = document.size();
+			double sx = width / size.width;
+			double sy = height / size.height;
+			if( sx != 1 || sy != 1 )
+				g.scale( sx, sy );
 
-				double sx = width / diagram.getWidth();
-				double sy = height / diagram.getHeight();
-				if( sx != 1 || sy != 1 )
-					g.scale( sx, sy );
-
-				diagram.setIgnoringClipHeuristic( true );
-
-				diagram.render( g );
-			} finally {
-				g.dispose();
-			}
-			return image;
-
-		} catch( SVGException ex ) {
-			throw new RuntimeException( ex );
+			document.render( null, g );
+		} finally {
+			g.dispose();
 		}
+		return image;
 	}
 
-	/**
-	 * Loads a SVG file.
-	 *
-	 * @param svgName the name of the SVG resource (a '/'-separated path)
-	 * @return the SVG diagram
-	 * @throws RuntimeException if failed to load SVG file
-	 */
-	private static SVGDiagram loadSVG( String svgName ) {
-		try {
-			URL url = FlatSVGUtils.class.getResource( svgName );
-			return SVGCache.getSVGUniverse().getDiagram( url.toURI() );
-		} catch( URISyntaxException ex ) {
-			throw new RuntimeException( ex );
-		}
+	private static URL getResource( String svgName ) {
+		return FlatSVGUtils.class.getResource( svgName );
 	}
 }

@@ -16,25 +16,33 @@
 
 plugins {
 	`java-library`
+	`flatlaf-toolchain`
 }
 
 dependencies {
 	implementation( project( ":flatlaf-core" ) )
 	implementation( project( ":flatlaf-extras" ) )
+	implementation( project( ":flatlaf-fonts-inter" ) )
+	implementation( project( ":flatlaf-fonts-jetbrains-mono" ) )
+	implementation( project( ":flatlaf-fonts-roboto" ) )
+	implementation( project( ":flatlaf-fonts-roboto-mono" ) )
 
-	implementation( "com.miglayout:miglayout-swing:5.3" )
-	implementation( "com.fifesoft:rsyntaxtextarea:3.1.2" )
-	implementation( "com.fifesoft:autocomplete:3.1.1" )
-	implementation( "com.fifesoft:rstaui:3.1.1" )
+	implementation( libs.miglayout.swing )
+	implementation( libs.fifesoft.rsyntaxtextarea )
+	implementation( libs.fifesoft.autocomplete )
 }
 
 tasks {
 	jar {
 		dependsOn( ":flatlaf-core:jar" )
 		dependsOn( ":flatlaf-extras:jar" )
+		dependsOn( ":flatlaf-fonts-inter:jar" )
+		dependsOn( ":flatlaf-fonts-jetbrains-mono:jar" )
+		dependsOn( ":flatlaf-fonts-roboto:jar" )
+		dependsOn( ":flatlaf-fonts-roboto-mono:jar" )
 
 		manifest {
-			attributes( "Main-Class" to "com.formdev.flatlaf.themeeditor.FlatThemeFileEditor" )
+			attributes( "Main-Class" to "com.formdev.flatlaf.themeeditor.FlatLafThemeEditor" )
 
 			if( JavaVersion.current() >= JavaVersion.VERSION_1_9 )
 				attributes( "Multi-Release" to "true" )

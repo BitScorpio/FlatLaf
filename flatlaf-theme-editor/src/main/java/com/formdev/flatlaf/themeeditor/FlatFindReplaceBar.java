@@ -16,15 +16,20 @@
 
 package com.formdev.flatlaf.themeeditor;
 
-import java.awt.Container;
+import java.awt.EventQueue;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
+import java.util.List;
 import java.util.function.Consumer;
 import javax.swing.*;
+import javax.swing.border.MatteBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import org.fife.rsta.ui.CollapsibleSectionPanel;
+import com.formdev.flatlaf.extras.components.*;
+import org.fife.ui.rsyntaxtextarea.DocumentRange;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
+import org.fife.ui.rsyntaxtextarea.RSyntaxUtilities;
+import org.fife.ui.rtextarea.RTextAreaHighlighter;
 import org.fife.ui.rtextarea.SearchContext;
 import org.fife.ui.rtextarea.SearchEngine;
 import org.fife.ui.rtextarea.SearchResult;
@@ -38,9 +43,13 @@ import net.miginfocom.swing.*;
 class FlatFindReplaceBar
 	extends JPanel
 {
+	static final String PROP_CLOSED = "closed";
+
 	private final RSyntaxTextArea textArea;
 
 	private SearchContext context;
+	private boolean inSetContext;
+	private boolean markAllPending;
 
 	FlatFindReplaceBar( RSyntaxTextArea textArea ) {
 		this.textArea = textArea;
@@ -53,22 +62,28 @@ class FlatFindReplaceBar
 		InputMap inputMap = getInputMap( JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT );
 		inputMap.put( KeyStroke.getKeyStroke( KeyEvent.VK_UP, 0 ), "findPrevious" );
 		inputMap.put( KeyStroke.getKeyStroke( KeyEvent.VK_DOWN, 0 ), "findNext" );
-		inputMap.put( KeyStroke.getKeyStroke( KeyEvent.VK_F12, 0 ), "focusEditor" );
+		inputMap.put( KeyStroke.getKeyStroke( KeyEvent.VK_PAGE_UP, 0 ), "editorPageUp" );
+		inputMap.put( KeyStroke.getKeyStroke( KeyEvent.VK_PAGE_DOWN, 0 ), "editorPageDown" );
 		ActionMap actionMap = getActionMap();
 		actionMap.put( "findPrevious", new ConsumerAction( e -> findPrevious() ) );
 		actionMap.put( "findNext", new ConsumerAction( e -> findNext() ) );
-		actionMap.put( "focusEditor", new ConsumerAction( e -> textArea.requestFocusInWindow() ) );
+		actionMap.put( "editorPageUp", new ConsumerAction( e -> notifyEditorAction( "page-up" ) ) );
+		actionMap.put( "editorPageDown", new ConsumerAction( e -> notifyEditorAction( "page-down" ) ) );
 
-		findPreviousButton.setIcon( new FlatSVGIcon( "com/formdev/flatlaf/themeeditor/icons/findAndShowPrevMatches.svg" ) );
-		findNextButton.setIcon( new FlatSVGIcon( "com/formdev/flatlaf/themeeditor/icons/findAndShowNextMatches.svg" ) );
-		matchCaseToggleButton.setIcon( new FlatSVGIcon( "com/formdev/flatlaf/themeeditor/icons/matchCase.svg" ) );
-		matchWholeWordToggleButton.setIcon( new FlatSVGIcon( "com/formdev/flatlaf/themeeditor/icons/words.svg" ) );
-		regexToggleButton.setIcon( new FlatSVGIcon( "com/formdev/flatlaf/themeeditor/icons/regex.svg" ) );
-		closeButton.setIcon( new FlatSVGIcon( "com/formdev/flatlaf/themeeditor/icons/close.svg" ) );
+		registerKeyboardAction( e -> close(),
+			KeyStroke.getKeyStroke( KeyEvent.VK_ESCAPE, 0, false ),
+			JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT );
 
 		SearchContext context = new SearchContext();
 		context.setSearchWrap( true );
 		setSearchContext( context );
+	}
+
+	@Override
+	public void updateUI() {
+		super.updateUI();
+
+		setBorder( new MatteBorder( 1, 0, 0, 0, UIManager.getColor( "Component.borderColor" ) ) );
 	}
 
 	SearchContext getSearchContext() {
@@ -78,29 +93,32 @@ class FlatFindReplaceBar
 	void setSearchContext( SearchContext context ) {
 		this.context = context;
 
-		findField.setText( context.getSearchFor() );
-		replaceField.setText( context.getReplaceWith() );
-		matchCaseToggleButton.setSelected( context.getMatchCase() );
-		matchWholeWordToggleButton.setSelected( context.getWholeWord() );
-		regexToggleButton.setSelected( context.isRegularExpression() );
+		inSetContext = true;
+		try {
+			findField.setText( context.getSearchFor() );
+			replaceField.setText( context.getReplaceWith() );
+			matchCaseToggleButton.setSelected( context.getMatchCase() );
+			matchWholeWordToggleButton.setSelected( context.getWholeWord() );
+			regexToggleButton.setSelected( context.isRegularExpression() );
+		} finally {
+			inSetContext = false;
+		}
 	}
 
-	@Override
-	public boolean requestFocusInWindow() {
-		// invoked from CollapsibleSectionPanel
-
-		// use selected text in editor for searching
-		String selectedText = textArea.getSelectedText();
-		if( !StringUtils.isEmpty( selectedText ) && selectedText.indexOf( '\n' ) < 0 )
-			findField.setText( selectedText );
-		else
-			findField.selectAll();
+	void activate( boolean findEditorSelection ) {
+		// use selected text of editor for searching
+		if( findEditorSelection ) {
+			String selectedText = textArea.getSelectedText();
+			if( !StringUtils.isEmpty( selectedText ) && selectedText.indexOf( '\n' ) < 0 )
+				findField.setText( selectedText );
+			else
+				findField.selectAll();
+		}
 
 		// if showing bar, highlight matches in editor
-		// (not invoking this from addNotify() because this would break the slide-in animation)
 		markAll();
 
-		return findField.requestFocusInWindow();
+		findField.requestFocusInWindow();
 	}
 
 	@Override
@@ -126,8 +144,21 @@ class FlatFindReplaceBar
 		findOrMarkAll( true );
 	}
 
-	private void markAll() {
-		findOrMarkAll( false );
+	void markAll() {
+		if( inSetContext )
+			return;
+
+		// do mark all only once
+		if( markAllPending )
+			return;
+		markAllPending = true;
+
+		EventQueue.invokeLater( () -> {
+			markAllPending = false;
+
+			findOrMarkAll( false );
+		} );
+
 	}
 
 	private void findOrMarkAll( boolean find ) {
@@ -139,6 +170,10 @@ class FlatFindReplaceBar
 		SearchResult result = find
 			? SearchEngine.find( textArea, context )
 			: SearchEngine.markAll( textArea, context );
+
+		// select (and scroll to) match near caret
+		if( !find && result.getMarkedCount() > 0 )
+			selectMatchNearCaret();
 
 		// update matches info label
 		updateMatchesLabel( result, false );
@@ -181,30 +216,68 @@ class FlatFindReplaceBar
 		context.setSearchFor( findField.getText() );
 		context.setReplaceWith( replaceField.getText() );
 
+		// make sure that search wrap is disabled because otherwise it is easy
+		// to have endless loop when replacing e.g. "a" with "aa"
+		boolean oldSearchWrap = context.getSearchWrap();
+		context.setSearchWrap( false );
+
 		// replace all
 		SearchResult result = SearchEngine.replaceAll( textArea, context );
+
+		// restore search wrap
+		context.setSearchWrap( oldSearchWrap );
 
 		// update matches info labels
 		updateMatchesLabel( result, true );
 	}
 
+	private void selectMatchNearCaret() {
+		RTextAreaHighlighter highlighter = (RTextAreaHighlighter) textArea.getHighlighter();
+		if( highlighter == null )
+			return;
+
+		List<DocumentRange> ranges = highlighter.getMarkAllHighlightRanges();
+		if( ranges.isEmpty() )
+			return;
+
+		DocumentRange selectRange = null;
+		if( ranges.size() > 1 ) {
+			int selStart = textArea.getSelectionStart();
+			for( DocumentRange range : ranges ) {
+				if( range.getEndOffset() >= selStart ) {
+					selectRange = range;
+					break;
+				}
+			}
+		}
+		if( selectRange == null )
+			selectRange = ranges.get( 0 );
+
+		RSyntaxUtilities.selectAndPossiblyCenter( textArea, selectRange, true );
+	}
+
 	private void updateMatchesLabel( SearchResult result, boolean replace ) {
 		matchesLabel.setText( result.getMarkedCount() + " matches" );
 		replaceMatchesLabel.setText( replace ? result.getCount() + " matches replaced" : null );
+
+		findField.setOutline( result.getMarkedCount() > 0 ? null : "error" );
+	}
+
+	private void notifyEditorAction( String actionKey ) {
+		Action action = textArea.getActionMap().get( actionKey );
+		if( action != null )
+			action.actionPerformed( new ActionEvent( textArea, ActionEvent.ACTION_PERFORMED, null ) );
 	}
 
 	private void close() {
-		Container parent = getParent();
-		if( parent instanceof CollapsibleSectionPanel )
-			((CollapsibleSectionPanel)parent).hideBottomComponent();
-		else if( parent != null )
-			parent.remove( this );
+		setVisible( false );
+		firePropertyChange( PROP_CLOSED, false, true );
 	}
 
 	private void initComponents() {
 		// JFormDesigner - Component initialization - DO NOT MODIFY  //GEN-BEGIN:initComponents
 		findLabel = new JLabel();
-		findField = new JTextField();
+		findField = new FlatTextField();
 		findToolBar = new JToolBar();
 		findPreviousButton = new JButton();
 		findNextButton = new JButton();
@@ -215,7 +288,7 @@ class FlatFindReplaceBar
 		closeToolBar = new JToolBar();
 		closeButton = new JButton();
 		replaceLabel = new JLabel();
-		replaceField = new JTextField();
+		replaceField = new FlatTextField();
 		toolBar1 = new JToolBar();
 		replaceButton = new JButton();
 		replaceAllButton = new JButton();
@@ -243,37 +316,44 @@ class FlatFindReplaceBar
 
 		//---- findField ----
 		findField.setColumns(16);
+		findField.setSelectAllOnFocusPolicy(FlatTextField.SelectAllOnFocusPolicy.always);
+		findField.setShowClearButton(true);
 		findField.addActionListener(e -> find());
 		add(findField, "cell 1 0");
 
 		//======== findToolBar ========
 		{
 			findToolBar.setFloatable(false);
-			findToolBar.setBorder(null);
+			findToolBar.setBorder(BorderFactory.createEmptyBorder());
 
 			//---- findPreviousButton ----
 			findPreviousButton.setToolTipText("Previous Occurrence");
+			findPreviousButton.setIcon(new FlatSVGIcon("com/formdev/flatlaf/themeeditor/icons/findAndShowPrevMatches.svg"));
 			findPreviousButton.addActionListener(e -> findPrevious());
 			findToolBar.add(findPreviousButton);
 
 			//---- findNextButton ----
 			findNextButton.setToolTipText("Next Occurrence");
+			findNextButton.setIcon(new FlatSVGIcon("com/formdev/flatlaf/themeeditor/icons/findAndShowNextMatches.svg"));
 			findNextButton.addActionListener(e -> findNext());
 			findToolBar.add(findNextButton);
 			findToolBar.addSeparator();
 
 			//---- matchCaseToggleButton ----
 			matchCaseToggleButton.setToolTipText("Match Case");
+			matchCaseToggleButton.setIcon(new FlatSVGIcon("com/formdev/flatlaf/themeeditor/icons/matchCase.svg"));
 			matchCaseToggleButton.addActionListener(e -> matchCaseChanged());
 			findToolBar.add(matchCaseToggleButton);
 
 			//---- matchWholeWordToggleButton ----
 			matchWholeWordToggleButton.setToolTipText("Match Whole Word");
+			matchWholeWordToggleButton.setIcon(new FlatSVGIcon("com/formdev/flatlaf/themeeditor/icons/words.svg"));
 			matchWholeWordToggleButton.addActionListener(e -> matchWholeWordChanged());
 			findToolBar.add(matchWholeWordToggleButton);
 
 			//---- regexToggleButton ----
 			regexToggleButton.setToolTipText("Regex");
+			regexToggleButton.setIcon(new FlatSVGIcon("com/formdev/flatlaf/themeeditor/icons/regex.svg"));
 			regexToggleButton.addActionListener(e -> regexChanged());
 			findToolBar.add(regexToggleButton);
 		}
@@ -286,7 +366,7 @@ class FlatFindReplaceBar
 		//======== closeToolBar ========
 		{
 			closeToolBar.setFloatable(false);
-			closeToolBar.setBorder(null);
+			closeToolBar.setBorder(BorderFactory.createEmptyBorder());
 
 			//---- closeButton ----
 			closeButton.setToolTipText("Close");
@@ -303,12 +383,14 @@ class FlatFindReplaceBar
 
 		//---- replaceField ----
 		replaceField.setColumns(16);
+		replaceField.setSelectAllOnFocusPolicy(FlatTextField.SelectAllOnFocusPolicy.always);
+		replaceField.setShowClearButton(true);
 		add(replaceField, "cell 1 1");
 
 		//======== toolBar1 ========
 		{
 			toolBar1.setFloatable(false);
-			toolBar1.setBorder(null);
+			toolBar1.setBorder(BorderFactory.createEmptyBorder());
 
 			//---- replaceButton ----
 			replaceButton.setText("Replace");
@@ -332,7 +414,7 @@ class FlatFindReplaceBar
 
 	// JFormDesigner - Variables declaration - DO NOT MODIFY  //GEN-BEGIN:variables
 	private JLabel findLabel;
-	private JTextField findField;
+	private FlatTextField findField;
 	private JToolBar findToolBar;
 	private JButton findPreviousButton;
 	private JButton findNextButton;
@@ -343,7 +425,7 @@ class FlatFindReplaceBar
 	private JToolBar closeToolBar;
 	private JButton closeButton;
 	private JLabel replaceLabel;
-	private JTextField replaceField;
+	private FlatTextField replaceField;
 	private JToolBar toolBar1;
 	private JButton replaceButton;
 	private JButton replaceAllButton;

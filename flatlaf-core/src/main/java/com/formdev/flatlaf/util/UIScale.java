@@ -33,6 +33,7 @@ import javax.swing.plaf.DimensionUIResource;
 import javax.swing.plaf.FontUIResource;
 import javax.swing.plaf.InsetsUIResource;
 import javax.swing.plaf.UIResource;
+import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatSystemProperties;
 
 /**
@@ -43,7 +44,7 @@ import com.formdev.flatlaf.FlatSystemProperties;
  * <p>
  * Two scaling modes are supported by FlatLaf for HiDPI displays:
  *
- * <h3>1) system scaling mode</h3>
+ * <h2>1) system scaling mode</h2>
  *
  * This mode is supported since Java 9 on all platforms and in some Java 8 VMs
  * (e.g. Apple and JetBrains). The JRE determines the scale factor per-display and
@@ -54,7 +55,7 @@ import com.formdev.flatlaf.FlatSystemProperties;
  * The scale factor may be different for each connected display.
  * The scale factor may change for a window when moving the window from one display to another one.
  *
- * <h3>2) user scaling mode</h3>
+ * <h2>2) user scaling mode</h2>
  *
  * This mode is mainly for Java 8 compatibility, but is also used on Linux
  * or if the default font is changed.
@@ -103,7 +104,7 @@ public class UIScale
 			// Java 9 and later supports per-monitor scaling
 			jreHiDPI = true;
 		} else if( SystemInfo.isJetBrainsJVM ) {
-			// IntelliJ IDEA ships its own JetBrains Java 8 JRE that may supports per-monitor scaling
+			// IntelliJ IDEA ships its own JetBrains Java 8 JRE that may support per-monitor scaling
 			// see com.intellij.ui.JreHiDpiUtil.isJreHiDPIEnabled()
 			try {
 				GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
@@ -188,15 +189,25 @@ public class UIScale
 		// because even if we are on a HiDPI display it is not sure
 		// that a larger font size is set by the current LaF
 		// (e.g. can avoid large icons with small text)
-		Font font = UIManager.getFont( "defaultFont" );
+		Font font = null;
+		if( UIManager.getLookAndFeel() instanceof FlatLaf )
+			font = UIManager.getFont( "defaultFont" );
 		if( font == null )
 			font = UIManager.getFont( "Label.font" );
 
-		float newScaleFactor;
+		setUserScaleFactor( computeFontScaleFactor( font ), true );
+	}
+
+	/**
+	 * For internal use only.
+	 *
+	 * @since 2
+	 */
+	public static float computeFontScaleFactor( Font font ) {
 		if( SystemInfo.isWindows ) {
 			// Special handling for Windows to be compatible with OS scaling,
 			// which distinguish between "screen scaling" and "text scaling".
-			//  - Windows "screen scaling" scales everything (text, icon, gaps, etc)
+			//  - Windows "screen scaling" scales everything (text, icon, gaps, etc.)
 			//    and may have different scaling factors for each screen.
 			//  - Windows "text scaling" increases only the font size, but on all screens.
 			//
@@ -204,36 +215,48 @@ public class UIScale
 			//  - Settings > Display > Scale and layout
 			//  - Settings > Ease of Access > Display > Make text bigger (100% - 225%)
 			if( font instanceof UIResource ) {
-				if( isSystemScalingEnabled() ) {
-					// Do not apply own scaling if the JRE scales using Windows screen scale factor.
-					// If user increases font size in Windows 10 settings, desktop property
-					// "win.messagebox.font" is changed and FlatLaf uses the larger font.
-					newScaleFactor = 1;
-				} else {
-					// If the JRE does not scale (Java 8), the size of the UI font
-					// (usually from desktop property "win.messagebox.font")
-					// combines the Windows screen and text scale factors.
-					// But the font in desktop property "win.defaultGUI.font" is only
-					// scaled with the Windows screen scale factor. So use it to compute
-					// our scale factor that is equal to Windows screen scale factor.
-					Font winFont = (Font) Toolkit.getDefaultToolkit().getDesktopProperty( "win.defaultGUI.font" );
-					newScaleFactor = computeScaleFactor( (winFont != null) ? winFont : font );
+				Font uiFont = (Font) Toolkit.getDefaultToolkit().getDesktopProperty( "win.messagebox.font" );
+				if( uiFont == null || uiFont.getSize() == font.getSize() ) {
+					if( isSystemScalingEnabled() ) {
+						// Do not apply own scaling if the JRE scales using Windows screen scale factor.
+						// If user increases font size in Windows 10 settings, desktop property
+						// "win.messagebox.font" is changed and FlatLaf uses the larger font.
+						return 1;
+					} else {
+						// If the JRE does not scale (Java 8), the size of the UI font
+						// (usually from desktop property "win.messagebox.font")
+						// combines the Windows screen and text scale factors.
+						// But the font in desktop property "win.defaultGUI.font" is only
+						// scaled with the Windows screen scale factor. So use it to compute
+						// our scale factor that is equal to Windows screen scale factor.
+						Font winFont = (Font) Toolkit.getDefaultToolkit().getDesktopProperty( "win.defaultGUI.font" );
+						return computeScaleFactor( (winFont != null) ? winFont : font );
+					}
 				}
-			} else {
-				// If font was explicitly set from outside (is not a UIResource)
-				// use it to compute scale factor. This allows applications to
-				// use custom fonts (e.g. that the user can change in UI) and
-				// get scaling if a larger font size is used.
-				// E.g. FlatLaf Demo supports increasing font size in "Font" menu and UI scales.
-				newScaleFactor = computeScaleFactor( font );
 			}
-		} else
-			newScaleFactor = computeScaleFactor( font );
 
-		setUserScaleFactor( newScaleFactor, true );
+			// If font was explicitly set from outside (is not a UIResource),
+			// or was set in FlatLaf properties files (is a UIResource),
+			// use it to compute scale factor. This allows applications to
+			// use custom fonts (e.g. that the user can change in UI) and
+			// get scaling if a larger font size is used.
+			// E.g. FlatLaf Demo supports increasing font size in "Font" menu and UI scales.
+		}
+
+		return computeScaleFactor( font );
 	}
 
 	private static float computeScaleFactor( Font font ) {
+		String customFontSizeDivider = System.getProperty( "flatlaf.uiScale.fontSizeDivider" );
+		if( customFontSizeDivider != null ) {
+			try {
+				float fontSizeDivider = Math.max( Integer.parseInt( customFontSizeDivider ), 10 );
+				return font.getSize() / fontSizeDivider;
+			} catch( NumberFormatException ex ) {
+				// ignore
+			}
+		}
+
 		// default font size
 		float fontSizeDivider = 12f;
 
@@ -401,7 +424,7 @@ public class UIScale
 	 * Scales the given dimension with the user scale factor.
 	 * <p>
 	 * If user scale factor is 1, then the given dimension is simply returned.
-	 * Otherwise a new instance of {@link Dimension} or {@link DimensionUIResource}
+	 * Otherwise, a new instance of {@link Dimension} or {@link DimensionUIResource}
 	 * is returned, depending on whether the passed dimension implements {@link UIResource}.
 	 */
 	public static Dimension scale( Dimension dimension ) {
@@ -417,7 +440,7 @@ public class UIScale
 	 * Scales the given insets with the user scale factor.
 	 * <p>
 	 * If user scale factor is 1, then the given insets is simply returned.
-	 * Otherwise a new instance of {@link Insets} or {@link InsetsUIResource}
+	 * Otherwise, a new instance of {@link Insets} or {@link InsetsUIResource}
 	 * is returned, depending on whether the passed dimension implements {@link UIResource}.
 	 */
 	public static Insets scale( Insets insets ) {

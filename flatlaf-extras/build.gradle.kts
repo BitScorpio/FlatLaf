@@ -16,13 +16,14 @@
 
 plugins {
 	`java-library`
+	`flatlaf-toolchain`
 	`flatlaf-module-info`
 	`flatlaf-publish`
 }
 
 dependencies {
 	implementation( project( ":flatlaf-core" ) )
-	implementation( "com.formdev:svgSalamander:1.1.2.4" )
+	implementation( libs.jsvg )
 }
 
 flatlafModuleInfo {
@@ -32,18 +33,6 @@ flatlafModuleInfo {
 java {
 	withSourcesJar()
 	withJavadocJar()
-}
-
-tasks {
-	javadoc {
-		options {
-			this as StandardJavadocDocletOptions
-			use( true )
-			tags = listOf( "uiDefault", "clientProperty" )
-			addStringOption( "Xdoclint:all,-missing", "-Xdoclint:all,-missing" )
-		}
-		isFailOnError = false
-	}
 }
 
 flatlafPublish {

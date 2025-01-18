@@ -19,16 +19,20 @@ package com.formdev.flatlaf.testing.uidefaults;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Locale;
 import javax.swing.UIDefaults;
 import javax.swing.UIManager;
 import com.formdev.flatlaf.*;
+import com.formdev.flatlaf.testing.FlatTestLaf;
 
 /**
  * Collects all FlatLaf UI defaults keys and dumps them to a file.
@@ -46,7 +50,9 @@ public class UIDefaultsKeysDump
 
 		// load existing keys file
 		HashSet<String> keys = new HashSet<>();
-		try( BufferedReader reader = new BufferedReader( new FileReader( keysFile ) ) ) {
+		try( BufferedReader reader = new BufferedReader( new InputStreamReader(
+			new FileInputStream( keysFile ), StandardCharsets.UTF_8 ) ) )
+		{
 			String key;
 			while( (key = reader.readLine()) != null ) {
 				keys.add( key );
@@ -60,9 +66,26 @@ public class UIDefaultsKeysDump
 		collectKeys( FlatDarkLaf.class.getName(), keys );
 		collectKeys( FlatIntelliJLaf.class.getName(), keys );
 		collectKeys( FlatDarculaLaf.class.getName(), keys );
+		collectKeys( FlatTestLaf.class.getName(), keys );
+
+		// remove unused keys (defined in BasicLookAndFeel)
+		keys.remove( "Button.textIconGap" );
+		keys.remove( "Button.textShiftOffset" );
+		keys.remove( "CheckBox.textIconGap" );
+		keys.remove( "CheckBox.textShiftOffset" );
+		keys.remove( "RadioButton.textIconGap" );
+		keys.remove( "RadioButton.textShiftOffset" );
+		keys.remove( "TabbedPane.contentOpaque" );
+		keys.remove( "TabbedPane.selectedTabPadInsets" );
+		keys.remove( "TabbedPane.shadow" );
+		keys.remove( "TabbedPane.tabsOverlapBorder" );
+		keys.remove( "ToggleButton.textIconGap" );
+		keys.remove( "ToggleButton.textShiftOffset" );
 
 		// write key file
-		try( Writer fileWriter = new BufferedWriter( new FileWriter( keysFile ) ) ) {
+		try( Writer fileWriter = new BufferedWriter( new OutputStreamWriter(
+			new FileOutputStream( keysFile ), StandardCharsets.UTF_8 ) ) )
+		{
 			String[] sortedKeys = keys.toArray( new String[keys.size()] );
 			Arrays.sort( sortedKeys );
 			for( String key : sortedKeys ) {
@@ -85,8 +108,15 @@ public class UIDefaultsKeysDump
 		UIDefaults defaults = UIManager.getLookAndFeel().getDefaults();
 
 		for( Object key : defaults.keySet() ) {
-			if( key instanceof String )
+			if( key instanceof String && !ignoreKey( (String) key ) )
 				keys.add( (String) key );
 		}
+	}
+
+	private static boolean ignoreKey( String key ) {
+		return key.startsWith( "FlatLaf.internal." ) ||
+			key.equals( "Menu.acceleratorFont" ) ||
+			key.equals( "CheckBoxMenuItem.acceleratorFont" ) ||
+			key.equals( "RadioButtonMenuItem.acceleratorFont" );
 	}
 }

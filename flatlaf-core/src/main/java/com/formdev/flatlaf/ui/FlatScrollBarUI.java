@@ -17,6 +17,7 @@
 package com.formdev.flatlaf.ui;
 
 import java.awt.Color;
+import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Insets;
@@ -24,6 +25,8 @@ import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.beans.PropertyChangeListener;
+import java.lang.invoke.MethodHandles;
+import java.util.Map;
 import java.util.Objects;
 import javax.swing.InputMap;
 import javax.swing.JButton;
@@ -35,6 +38,14 @@ import javax.swing.UIManager;
 import javax.swing.plaf.ComponentUI;
 import javax.swing.plaf.basic.BasicScrollBarUI;
 import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.ui.FlatStylingSupport.Styleable;
+import com.formdev.flatlaf.ui.FlatStylingSupport.StyleableField;
+import com.formdev.flatlaf.ui.FlatStylingSupport.StyleableLookupProvider;
+import com.formdev.flatlaf.ui.FlatStylingSupport.StyleableUI;
+import com.formdev.flatlaf.util.HiDPIUtils;
+import com.formdev.flatlaf.util.LoggingFacade;
+import com.formdev.flatlaf.util.SystemInfo;
 import com.formdev.flatlaf.util.UIScale;
 
 /**
@@ -43,7 +54,7 @@ import com.formdev.flatlaf.util.UIScale;
  * <!-- BasicScrollBarUI -->
  *
  * @uiDefault ScrollBar.background			Color
- * @uiDefault ScrollBar.foreground			Color
+ * @uiDefault ScrollBar.foreground			Color	unused
  * @uiDefault ScrollBar.track				Color
  * @uiDefault ScrollBar.thumb				Color
  * @uiDefault ScrollBar.width				int
@@ -53,6 +64,7 @@ import com.formdev.flatlaf.util.UIScale;
  *
  * <!-- FlatScrollBarUI -->
  *
+ * @uiDefault ScrollBar.minimumButtonSize			Dimension
  * @uiDefault ScrollBar.trackInsets					Insets
  * @uiDefault ScrollBar.thumbInsets					Insets
  * @uiDefault ScrollBar.trackArc					int
@@ -72,33 +84,54 @@ import com.formdev.flatlaf.util.UIScale;
  *
  * @author Karl Tauber
  */
+@StyleableField( cls=BasicScrollBarUI.class, key="track", fieldName="trackColor" )
+@StyleableField( cls=BasicScrollBarUI.class, key="thumb", fieldName="thumbColor" )
+@StyleableField( cls=BasicScrollBarUI.class, key="width", fieldName="scrollBarWidth" )
+@StyleableField( cls=BasicScrollBarUI.class, key="minimumThumbSize" )
+@StyleableField( cls=BasicScrollBarUI.class, key="maximumThumbSize" )
+
 public class FlatScrollBarUI
 	extends BasicScrollBarUI
+	implements StyleableUI, StyleableLookupProvider
 {
-	protected Insets trackInsets;
-	protected Insets thumbInsets;
-	protected int trackArc;
-	protected int thumbArc;
-	protected Color hoverTrackColor;
-	protected Color hoverThumbColor;
-	protected boolean hoverThumbWithTrack;
-	protected Color pressedTrackColor;
-	protected Color pressedThumbColor;
-	protected boolean pressedThumbWithTrack;
+	// overrides BasicScrollBarUI.supportsAbsolutePositioning (which is private)
+	@Styleable protected boolean allowsAbsolutePositioning;
 
-	protected boolean showButtons;
-	protected String arrowType;
-	protected Color buttonArrowColor;
-	protected Color buttonDisabledArrowColor;
-	protected Color hoverButtonBackground;
-	protected Color pressedButtonBackground;
+	/** @since 2.1 */ @Styleable protected Dimension minimumButtonSize;
+	@Styleable protected Insets trackInsets;
+	@Styleable protected Insets thumbInsets;
+	@Styleable protected int trackArc;
+	@Styleable protected int thumbArc;
+	@Styleable protected Color hoverTrackColor;
+	@Styleable protected Color hoverThumbColor;
+	@Styleable protected boolean hoverThumbWithTrack;
+	@Styleable protected Color pressedTrackColor;
+	@Styleable protected Color pressedThumbColor;
+	@Styleable protected boolean pressedThumbWithTrack;
+
+	@Styleable protected boolean showButtons;
+	@Styleable protected String arrowType;
+	@Styleable protected Color buttonArrowColor;
+	@Styleable protected Color buttonDisabledArrowColor;
+	@Styleable protected Color hoverButtonBackground;
+	@Styleable protected Color pressedButtonBackground;
 
 	private MouseAdapter hoverListener;
 	protected boolean hoverTrack;
 	protected boolean hoverThumb;
 
+	private Map<String, Object> oldStyleValues;
+	private boolean isAWTPeer;
+
 	public static ComponentUI createUI( JComponent c ) {
 		return new FlatScrollBarUI();
+	}
+
+	@Override
+	public void installUI( JComponent c ) {
+		super.installUI( c );
+
+		installStyle();
 	}
 
 	@Override
@@ -123,6 +156,9 @@ public class FlatScrollBarUI
 	protected void installDefaults() {
 		super.installDefaults();
 
+		allowsAbsolutePositioning = super.getSupportsAbsolutePositioning();
+
+		minimumButtonSize = UIManager.getDimension( "ScrollBar.minimumButtonSize" );
 		trackInsets = UIManager.getInsets( "ScrollBar.trackInsets" );
 		thumbInsets = UIManager.getInsets( "ScrollBar.thumbInsets" );
 		trackArc = UIManager.getInt( "ScrollBar.trackArc" );
@@ -152,6 +188,7 @@ public class FlatScrollBarUI
 	protected void uninstallDefaults() {
 		super.uninstallDefaults();
 
+		minimumButtonSize = null;
 		trackInsets = null;
 		thumbInsets = null;
 		hoverTrackColor = null;
@@ -163,6 +200,8 @@ public class FlatScrollBarUI
 		buttonDisabledArrowColor = null;
 		hoverButtonBackground = null;
 		pressedButtonBackground = null;
+
+		oldStyleValues = null;
 	}
 
 	@Override
@@ -174,7 +213,14 @@ public class FlatScrollBarUI
 			switch( e.getPropertyName() ) {
 				case FlatClientProperties.SCROLL_BAR_SHOW_BUTTONS:
 					scrollbar.revalidate();
-					scrollbar.repaint();
+					HiDPIUtils.repaint( scrollbar );
+					break;
+
+				case FlatClientProperties.STYLE:
+				case FlatClientProperties.STYLE_CLASS:
+					installStyle();
+					scrollbar.revalidate();
+					HiDPIUtils.repaint( scrollbar );
 					break;
 
 				case "componentOrientation":
@@ -189,8 +235,83 @@ public class FlatScrollBarUI
 					}
 					SwingUtilities.replaceUIInputMap( scrollbar, JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT, inputMap );
 					break;
+
+				case "ancestor":
+					// check whether scroll bar is used as AWT peer on macOS
+					if( SystemInfo.isMacOS ) {
+						Container p = scrollbar.getParent();
+						for( int i = 0; i < 2 && p != null; i++, p = p.getParent() ) {
+							if( FlatUIUtils.isAWTPeer( p ) ) {
+								// Used to disable hover, which does not work correctly
+								// because scroll bars do not receive mouse exited event.
+								// The scroll pane, including its scroll bars, is not part
+								// of the component hierarchy and does not receive mouse events
+								// directly. Instead, LWComponentPeer receives mouse events
+								// and delegates them to peers, but entered/exited events
+								// are sent only for the whole scroll pane.
+								// Exited event is only sent when mouse leaves scroll pane.
+								// If mouse enters/exits scroll bar, no entered/exited events are sent.
+								isAWTPeer = true;
+
+								// if dark theme is active, reinstall using light theme
+								if( FlatLaf.isLafDark() ) {
+									FlatUIUtils.runWithLightAWTPeerUIDefaults( () -> {
+										JScrollBar scrollbar = this.scrollbar;
+										uninstallUI( scrollbar );
+										installUI( scrollbar );
+									} );
+								}
+								break;
+							}
+						}
+					}
+					break;
 			}
 		};
+	}
+
+	/** @since 2 */
+	protected void installStyle() {
+		try {
+			applyStyle( FlatStylingSupport.getResolvedStyle( scrollbar, "ScrollBar" ) );
+		} catch( RuntimeException ex ) {
+			LoggingFacade.INSTANCE.logSevere( null, ex );
+		}
+	}
+
+	/** @since 2 */
+	protected void applyStyle( Object style ) {
+		oldStyleValues = FlatStylingSupport.parseAndApply( oldStyleValues, style, this::applyStyleProperty );
+
+		if( incrButton instanceof FlatScrollBarButton )
+			((FlatScrollBarButton)incrButton).updateStyle();
+		if( decrButton instanceof FlatScrollBarButton )
+			((FlatScrollBarButton)decrButton).updateStyle();
+	}
+
+	/** @since 2 */
+	protected Object applyStyleProperty( String key, Object value ) {
+		return FlatStylingSupport.applyToAnnotatedObjectOrComponent( this, scrollbar, key, value );
+	}
+
+	/** @since 2 */
+	@Override
+	public Map<String, Class<?>> getStyleableInfos( JComponent c ) {
+		return FlatStylingSupport.getAnnotatedStyleableInfos( this );
+	}
+
+	/** @since 2.5 */
+	@Override
+	public Object getStyleableValue( JComponent c, String key ) {
+		return FlatStylingSupport.getAnnotatedStyleableValue( this, key );
+	}
+
+	/** @since 2.5 */
+	@Override
+	public MethodHandles.Lookup getLookupForStyling() {
+		// MethodHandles.lookup() is caller sensitive and must be invoked in this class,
+		// otherwise it is not possible to access protected fields in JRE superclass
+		return MethodHandles.lookup();
 	}
 
 	@Override
@@ -209,9 +330,17 @@ public class FlatScrollBarUI
 	}
 
 	protected boolean isShowButtons() {
+		// check client property on scroll bar
 		Object showButtons = scrollbar.getClientProperty( FlatClientProperties.SCROLL_BAR_SHOW_BUTTONS );
-		if( showButtons == null && scrollbar.getParent() instanceof JScrollPane )
-			showButtons = ((JScrollPane)scrollbar.getParent()).getClientProperty( FlatClientProperties.SCROLL_BAR_SHOW_BUTTONS );
+		if( showButtons == null && scrollbar.getParent() instanceof JScrollPane ) {
+			JScrollPane scrollPane = (JScrollPane) scrollbar.getParent();
+			// check client property on scroll pane
+			showButtons = scrollPane.getClientProperty( FlatClientProperties.SCROLL_BAR_SHOW_BUTTONS );
+			if( showButtons == null && scrollPane.getUI() instanceof FlatScrollPaneUI ) {
+				// check styling property on scroll pane
+				showButtons = ((FlatScrollPaneUI)scrollPane.getUI()).showButtons;
+			}
+		}
 		return (showButtons != null) ? Objects.equals( showButtons, true ) : this.showButtons;
 	}
 
@@ -224,6 +353,9 @@ public class FlatScrollBarUI
 
 	@Override
 	protected void paintTrack( Graphics g, JComponent c, Rectangle trackBounds ) {
+		if( trackBounds.isEmpty() || !scrollbar.isEnabled() )
+			return;
+
 		g.setColor( getTrackColor( c, hoverTrack, isPressed && hoverTrack && !hoverThumb ) );
 		paintTrackOrThumb( g, c, trackBounds, trackInsets, trackArc );
 	}
@@ -270,7 +402,7 @@ public class FlatScrollBarUI
 		Color trackColor = FlatUIUtils.deriveColor( this.trackColor, c.getBackground() );
 		return (pressed && pressedTrackColor != null)
 			? FlatUIUtils.deriveColor( pressedTrackColor, trackColor )
-			: ((hover && hoverTrackColor != null)
+			: ((hover && hoverTrackColor != null && !isAWTPeer)
 				? FlatUIUtils.deriveColor( hoverTrackColor, trackColor )
 				: trackColor);
 	}
@@ -280,7 +412,7 @@ public class FlatScrollBarUI
 		Color thumbColor = FlatUIUtils.deriveColor( this.thumbColor, trackColor );
 		return (pressed && pressedThumbColor != null)
 			? FlatUIUtils.deriveColor( pressedThumbColor, thumbColor )
-			: ((hover && hoverThumbColor != null)
+			: ((hover && hoverThumbColor != null && !isAWTPeer)
 				? FlatUIUtils.deriveColor( hoverThumbColor, thumbColor )
 				: thumbColor);
 	}
@@ -293,6 +425,11 @@ public class FlatScrollBarUI
 	@Override
 	protected Dimension getMaximumThumbSize() {
 		return UIScale.scale( FlatUIUtils.addInsets( super.getMaximumThumbSize(), thumbInsets ) );
+	}
+
+	@Override
+	public boolean getSupportsAbsolutePositioning() {
+		return allowsAbsolutePositioning;
 	}
 
 	//---- class ScrollBarHoverListener ---------------------------------------
@@ -319,16 +456,29 @@ public class FlatScrollBarUI
 
 		@Override
 		public void mousePressed( MouseEvent e ) {
-			isPressed = true;
-			repaint();
+			if( SwingUtilities.isLeftMouseButton( e ) || isAbsolutePositioning( e ) ) {
+				isPressed = true;
+				repaint();
+
+				// update hover because BasicScrollBarUI.TrackListener.mousePressed()
+				// moves the track on middle-click (if absolute positioning is enabled)
+				if( isAbsolutePositioning( e ) )
+					update( e.getX(), e.getY() );
+			}
 		}
 
 		@Override
 		public void mouseReleased( MouseEvent e ) {
-			isPressed = false;
-			repaint();
+			if( SwingUtilities.isLeftMouseButton( e ) || isAbsolutePositioning( e ) ) {
+				isPressed = false;
+				repaint();
+			}
 
 			update( e.getX(), e.getY() );
+		}
+
+		private boolean isAbsolutePositioning( MouseEvent e ) {
+			return getSupportsAbsolutePositioning() && SwingUtilities.isMiddleMouseButton( e );
 		}
 
 		private void update( int x, int y ) {
@@ -343,7 +493,7 @@ public class FlatScrollBarUI
 
 		private void repaint() {
 			if( scrollbar.isEnabled() )
-				scrollbar.repaint();
+				HiDPIUtils.repaint( scrollbar );
 		}
 	}
 
@@ -363,9 +513,25 @@ public class FlatScrollBarUI
 			super( direction, type, foreground, disabledForeground,
 				hoverForeground, hoverBackground, pressedForeground, pressedBackground );
 
-			setArrowWidth( FlatArrowButton.DEFAULT_ARROW_WIDTH - 2 );
 			setFocusable( false );
 			setRequestFocusEnabled( false );
+		}
+
+		protected void updateStyle() {
+			updateStyle( arrowType, buttonArrowColor, buttonDisabledArrowColor,
+				null, hoverButtonBackground, null, pressedButtonBackground );
+		}
+
+		@Override
+		public int getArrowWidth() {
+			// scale arrow size depending on scroll bar width
+			// (6 is default arrow width; 10 is base scroll bar width)
+			int arrowWidth = Math.round( 6 * (scrollBarWidth / 10f) );
+
+			// compute arrow size that leaves equal space on both sides (arrow is centered)
+			arrowWidth = scrollBarWidth - (((scrollBarWidth - arrowWidth) / 2) * 2);
+
+			return arrowWidth;
 		}
 
 		@Override
@@ -376,8 +542,9 @@ public class FlatScrollBarUI
 		@Override
 		public Dimension getPreferredSize() {
 			if( isShowButtons() ) {
-				int w = UIScale.scale( scrollBarWidth );
-				return new Dimension( w, w );
+				int w = UIScale.scale( Math.max( scrollBarWidth, (minimumButtonSize != null) ? minimumButtonSize.width : 0 ) );
+				int h = UIScale.scale( Math.max( scrollBarWidth, (minimumButtonSize != null) ? minimumButtonSize.height : 0 ) );
+				return new Dimension( w, h );
 			} else
 				return new Dimension();
 		}

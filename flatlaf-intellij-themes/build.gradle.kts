@@ -16,6 +16,7 @@
 
 plugins {
 	`java-library`
+	`flatlaf-toolchain`
 	`flatlaf-module-info`
 	`flatlaf-publish`
 }
@@ -31,18 +32,6 @@ flatlafModuleInfo {
 java {
 	withSourcesJar()
 	withJavadocJar()
-}
-
-tasks {
-	javadoc {
-		options {
-			this as StandardJavadocDocletOptions
-			use( true )
-			tags = listOf( "uiDefault", "clientProperty" )
-			addStringOption( "Xdoclint:all,-missing", "-Xdoclint:all,-missing" )
-		}
-		isFailOnError = false
-	}
 }
 
 flatlafPublish {

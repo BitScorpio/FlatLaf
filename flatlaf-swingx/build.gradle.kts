@@ -16,6 +16,7 @@
 
 plugins {
 	`java-library`
+	`flatlaf-toolchain`
 	`flatlaf-module-info`
 	`flatlaf-publish`
 }
@@ -24,7 +25,7 @@ dependencies {
 	implementation( project( ":flatlaf-core" ) )
 
 	// use compileOnly() because there are various SwingX libraries available on Maven Central
-	compileOnly( "org.swinglabs.swingx:swingx-all:1.6.5-1" )
+	compileOnly( libs.swingx.all )
 }
 
 flatlafModuleInfo {
@@ -34,17 +35,6 @@ flatlafModuleInfo {
 java {
 	withSourcesJar()
 	withJavadocJar()
-}
-
-tasks {
-	javadoc {
-		options {
-			this as StandardJavadocDocletOptions
-			use( true )
-			tags = listOf( "uiDefault", "clientProperty" )
-		}
-		isFailOnError = false
-	}
 }
 
 flatlafPublish {

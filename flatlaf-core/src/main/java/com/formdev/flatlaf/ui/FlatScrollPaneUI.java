@@ -17,8 +17,12 @@
 package com.formdev.flatlaf.ui;
 
 import java.awt.Component;
+import java.awt.Container;
 import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.Insets;
+import java.awt.KeyboardFocusManager;
+import java.awt.LayoutManager;
 import java.awt.Rectangle;
 import java.awt.event.ContainerEvent;
 import java.awt.event.ContainerListener;
@@ -28,21 +32,32 @@ import java.awt.event.MouseWheelEvent;
 import java.awt.event.MouseWheelListener;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
+import javax.swing.JTree;
 import javax.swing.JViewport;
 import javax.swing.LookAndFeel;
 import javax.swing.ScrollPaneConstants;
+import javax.swing.ScrollPaneLayout;
 import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
+import javax.swing.border.Border;
 import javax.swing.plaf.ComponentUI;
 import javax.swing.plaf.basic.BasicScrollPaneUI;
 import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.ui.FlatStylingSupport.Styleable;
+import com.formdev.flatlaf.ui.FlatStylingSupport.StyleableUI;
+import com.formdev.flatlaf.util.HiDPIUtils;
+import com.formdev.flatlaf.util.LoggingFacade;
+import com.formdev.flatlaf.util.UIScale;
 
 /**
  * Provides the Flat LaF UI delegate for {@link javax.swing.JScrollPane}.
@@ -63,8 +78,15 @@ import com.formdev.flatlaf.FlatClientProperties;
  */
 public class FlatScrollPaneUI
 	extends BasicScrollPaneUI
+	implements StyleableUI
 {
+	// only used via styling (not in UI defaults, but has likewise client properties)
+	/** @since 2 */ @Styleable protected Boolean showButtons;
+
 	private Handler handler;
+
+	private Map<String, Object> oldStyleValues;
+	private AtomicBoolean borderShared;
 
 	public static ComponentUI createUI( JComponent c ) {
 		return new FlatScrollPaneUI();
@@ -72,10 +94,25 @@ public class FlatScrollPaneUI
 
 	@Override
 	public void installUI( JComponent c ) {
+		if( FlatUIUtils.needsLightAWTPeer( c ) )
+			FlatUIUtils.runWithLightAWTPeerUIDefaults( () -> installUIImpl( c ) );
+		else
+			installUIImpl( c );
+	}
+
+	private void installUIImpl( JComponent c ) {
 		super.installUI( c );
 
 		int focusWidth = UIManager.getInt( "Component.focusWidth" );
-		LookAndFeel.installProperty( c, "opaque", focusWidth == 0 );
+		int arc = UIManager.getInt( "ScrollPane.arc" );
+		LookAndFeel.installProperty( c, "opaque", focusWidth == 0 && arc == 0 );
+
+		// install layout manager
+		LayoutManager layout = c.getLayout();
+		if( layout != null && layout.getClass() == ScrollPaneLayout.UIResource.class )
+			c.setLayout( createScrollPaneLayout() );
+
+		installStyle();
 
 		MigLayoutVisualPadding.install( scrollpane );
 	}
@@ -84,7 +121,14 @@ public class FlatScrollPaneUI
 	public void uninstallUI( JComponent c ) {
 		MigLayoutVisualPadding.uninstall( scrollpane );
 
+		// uninstall layout manager
+		if( c.getLayout() instanceof FlatScrollPaneLayout )
+			c.setLayout( new ScrollPaneLayout.UIResource() );
+
 		super.uninstallUI( c );
+
+		oldStyleValues = null;
+		borderShared = null;
 	}
 
 	@Override
@@ -101,6 +145,13 @@ public class FlatScrollPaneUI
 		removeViewportListeners( scrollpane.getViewport() );
 
 		handler = null;
+	}
+
+	/**
+	 * @since 3.3
+	 */
+	protected FlatScrollPaneLayout createScrollPaneLayout() {
+		return new FlatScrollPaneLayout();
 	}
 
 	@Override
@@ -159,7 +210,7 @@ public class FlatScrollPaneUI
 
 			// Use (0, 0) view position to obtain a constant unit increment of first item.
 			// Unit increment may be different for each item.
-			Rectangle visibleRect = new Rectangle( viewport.getViewSize() );
+			Rectangle visibleRect = new Rectangle( viewport.getExtentSize() );
 			unitIncrement = scrollable.getScrollableUnitIncrement( visibleRect, orientation, 1 );
 
 			if( unitIncrement > 0 ) {
@@ -247,11 +298,11 @@ public class FlatScrollPaneUI
 					JScrollBar hsb = scrollpane.getHorizontalScrollBar();
 					if( vsb != null ) {
 						vsb.revalidate();
-						vsb.repaint();
+						HiDPIUtils.repaint( vsb );
 					}
 					if( hsb != null ) {
 						hsb.revalidate();
-						hsb.repaint();
+						HiDPIUtils.repaint( hsb );
 					}
 					break;
 
@@ -263,13 +314,35 @@ public class FlatScrollPaneUI
 					Object corner = e.getNewValue();
 					if( corner instanceof JButton &&
 						((JButton)corner).getBorder() instanceof FlatButtonBorder &&
-						scrollpane.getViewport() != null &&
-						scrollpane.getViewport().getView() instanceof JTable )
+						getView( scrollpane ) instanceof JTable )
 					{
 						((JButton)corner).setBorder( BorderFactory.createEmptyBorder() );
 						((JButton)corner).setFocusable( false );
 					}
-				break;
+					break;
+
+				case FlatClientProperties.OUTLINE:
+					HiDPIUtils.repaint( scrollpane );
+					break;
+
+				case FlatClientProperties.STYLE:
+				case FlatClientProperties.STYLE_CLASS:
+					installStyle();
+					scrollpane.revalidate();
+					HiDPIUtils.repaint( scrollpane );
+					break;
+
+				case "border":
+					Object newBorder = e.getNewValue();
+					if( newBorder != null && newBorder == UIManager.getBorder( "Table.scrollPaneBorder" ) ) {
+						// JTable.configureEnclosingScrollPaneUI() replaces the scrollpane border
+						// with another one --> re-apply style on new border
+						borderShared = null;
+						installStyle();
+						scrollpane.revalidate();
+						HiDPIUtils.repaint( scrollpane );
+					}
+					break;
 			}
 		};
 	}
@@ -280,12 +353,51 @@ public class FlatScrollPaneUI
 		return handler;
 	}
 
+	/** @since 2 */
+	protected void installStyle() {
+		try {
+			applyStyle( FlatStylingSupport.getResolvedStyle( scrollpane, "ScrollPane" ) );
+		} catch( RuntimeException ex ) {
+			LoggingFacade.INSTANCE.logSevere( null, ex );
+		}
+	}
+
+	/** @since 2 */
+	protected void applyStyle( Object style ) {
+		oldStyleValues = FlatStylingSupport.parseAndApply( oldStyleValues, style, this::applyStyleProperty );
+	}
+
+	/** @since 2 */
+	protected Object applyStyleProperty( String key, Object value ) {
+		if( key.equals( "focusWidth" ) || key.equals( "arc" ) ) {
+			int focusWidth = (value instanceof Integer) ? (int) value : UIManager.getInt( "Component.focusWidth" );
+			int arc = (value instanceof Integer) ? (int) value : UIManager.getInt( "ScrollPane.arc" );
+			LookAndFeel.installProperty( scrollpane, "opaque", focusWidth == 0 && arc == 0 );
+		}
+
+		if( borderShared == null )
+			borderShared = new AtomicBoolean( true );
+		return FlatStylingSupport.applyToAnnotatedObjectOrBorder( this, key, value, scrollpane, borderShared );
+	}
+
+	/** @since 2 */
+	@Override
+	public Map<String, Class<?>> getStyleableInfos( JComponent c ) {
+		return FlatStylingSupport.getAnnotatedStyleableInfos( this, scrollpane.getBorder() );
+	}
+
+	/** @since 2.5 */
+	@Override
+	public Object getStyleableValue( JComponent c, String key ) {
+		return FlatStylingSupport.getAnnotatedStyleableValue( this, scrollpane.getBorder(), key );
+	}
+
 	@Override
 	protected void updateViewport( PropertyChangeEvent e ) {
 		super.updateViewport( e );
 
-		JViewport oldViewport = (JViewport) (e.getOldValue());
-		JViewport newViewport = (JViewport) (e.getNewValue());
+		JViewport oldViewport = (JViewport) e.getOldValue();
+		JViewport newViewport = (JViewport) e.getNewValue();
 
 		removeViewportListeners( oldViewport );
 		addViewportListeners( newViewport );
@@ -326,7 +438,82 @@ public class FlatScrollPaneUI
 				c.getHeight() - insets.top - insets.bottom );
 		}
 
+		// if view is rounded, paint rounded background with view background color
+		// to ensure that free areas at left and right have same color as view
+		Component view;
+		float arc = getBorderArc( scrollpane );
+		if( arc > 0 && (view = getView( scrollpane )) != null ) {
+			float focusWidth = FlatUIUtils.getBorderFocusWidth( c );
+
+			g.setColor( view.getBackground() );
+
+			Object[] oldRenderingHints = FlatUIUtils.setRenderingHints( g );
+			FlatUIUtils.paintComponentBackground( (Graphics2D) g, 0, 0, c.getWidth(), c.getHeight(), focusWidth, arc );
+			FlatUIUtils.resetRenderingHints( g, oldRenderingHints );
+		}
+
 		paint( g, c );
+	}
+
+	@Override
+	public void paint( Graphics g, JComponent c ) {
+		Border viewportBorder = scrollpane.getViewportBorder();
+		if( viewportBorder != null ) {
+			Rectangle r = scrollpane.getViewportBorderBounds();
+			int padding = getBorderLeftRightPadding( scrollpane );
+			JScrollBar vsb = scrollpane.getVerticalScrollBar();
+			if( padding > 0 &&
+				vsb != null && vsb.isVisible() &&
+				scrollpane.getLayout() instanceof FlatScrollPaneLayout &&
+				((FlatScrollPaneLayout)scrollpane.getLayout()).canIncreaseViewportWidth( scrollpane ) )
+			{
+				boolean ltr = scrollpane.getComponentOrientation().isLeftToRight();
+				int extraWidth = Math.min( padding, vsb.getWidth() );
+				viewportBorder.paintBorder( scrollpane, g, r.x - (ltr ? 0 : extraWidth), r.y, r.width + extraWidth, r.height );
+			} else
+				viewportBorder.paintBorder( scrollpane, g, r.x, r.y, r.width, r.height );
+		}
+	}
+
+	/** @since 1.3 */
+	public static boolean isPermanentFocusOwner( JScrollPane scrollPane ) {
+		Component view = getView( scrollPane );
+		if( view == null )
+			return false;
+
+		// check whether view is focus owner
+		if( FlatUIUtils.isPermanentFocusOwner( view ) )
+			return true;
+
+		// check whether editor component in JTable or JTree is focus owner
+		if( (view instanceof JTable && ((JTable)view).isEditing()) ||
+			(view instanceof JTree && ((JTree)view).isEditing()) )
+		{
+			Component focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+			if( focusOwner != null )
+				return SwingUtilities.isDescendingFrom( focusOwner, view );
+		}
+
+		return false;
+	}
+
+	static Component getView( JScrollPane scrollPane ) {
+		JViewport viewport = scrollPane.getViewport();
+		return (viewport != null) ? viewport.getView() : null;
+	}
+
+	private static float getBorderArc( JScrollPane scrollPane ) {
+		Border border = scrollPane.getBorder();
+		return (border instanceof FlatScrollPaneBorder)
+			? UIScale.scale( (float) ((FlatScrollPaneBorder)border).getArc( scrollPane ) )
+			: 0;
+	}
+
+	private static int getBorderLeftRightPadding( JScrollPane scrollPane ) {
+		Border border = scrollPane.getBorder();
+		return (border instanceof FlatScrollPaneBorder)
+			? ((FlatScrollPaneBorder)border).getLeftRightPadding( scrollPane )
+			: 0;
 	}
 
 	//---- class Handler ------------------------------------------------------
@@ -350,12 +537,72 @@ public class FlatScrollPaneUI
 
 		@Override
 		public void focusGained( FocusEvent e ) {
-			scrollpane.repaint();
+			// necessary to update focus border
+			if( scrollpane.getBorder() instanceof FlatBorder )
+				HiDPIUtils.repaint( scrollpane );
 		}
 
 		@Override
 		public void focusLost( FocusEvent e ) {
-			scrollpane.repaint();
+			// necessary to update focus border
+			if( scrollpane.getBorder() instanceof FlatBorder )
+				HiDPIUtils.repaint( scrollpane );
+		}
+	}
+
+	//---- class FlatScrollPaneLayout -----------------------------------------
+
+	/**
+	 * @since 3.3
+	 */
+	protected static class FlatScrollPaneLayout
+		extends ScrollPaneLayout.UIResource
+	{
+		@Override
+		public void layoutContainer( Container parent ) {
+			super.layoutContainer( parent );
+
+			JScrollPane scrollPane = (JScrollPane) parent;
+			int padding = getBorderLeftRightPadding( scrollPane );
+			if( padding > 0 && vsb != null && vsb.isVisible() ) {
+				// move vertical scrollbar to trailing edge
+				Insets insets = scrollPane.getInsets();
+				Rectangle r = vsb.getBounds();
+				int y = Math.max( r.y, insets.top + padding );
+				int y2 = Math.min( r.y + r.height, scrollPane.getHeight() - insets.bottom - padding );
+				boolean ltr = scrollPane.getComponentOrientation().isLeftToRight();
+
+				vsb.setBounds( r.x + (ltr ? padding : -padding), y, r.width, y2 - y );
+
+				// increase width of viewport, column header and horizontal scrollbar
+				if( canIncreaseViewportWidth( scrollPane ) ) {
+					int extraWidth = Math.min( padding, vsb.getWidth() );
+					resizeViewport( viewport, extraWidth, ltr );
+					resizeViewport( colHead, extraWidth, ltr );
+					resizeViewport( hsb, extraWidth, ltr );
+				}
+			}
+		}
+
+		boolean canIncreaseViewportWidth( JScrollPane scrollPane ) {
+			return scrollPane.getComponentOrientation().isLeftToRight()
+				? !isCornerVisible( upperRight ) && !isCornerVisible( lowerRight )
+				: !isCornerVisible( upperLeft ) && !isCornerVisible( lowerLeft );
+		}
+
+		private static boolean isCornerVisible( Component corner ) {
+			return corner != null &&
+				corner.getWidth() > 0 &&
+				corner.getHeight() > 0 &&
+				corner.isVisible();
+		}
+
+		private static void resizeViewport( Component c, int extraWidth, boolean ltr ) {
+			if( c == null )
+				return;
+
+			Rectangle vr = c.getBounds();
+			c.setBounds( vr.x - (ltr ? 0 : extraWidth), vr.y, vr.width + extraWidth, vr.height );
 		}
 	}
 }

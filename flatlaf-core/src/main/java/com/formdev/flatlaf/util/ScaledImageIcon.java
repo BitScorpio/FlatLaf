@@ -16,6 +16,7 @@
 
 package com.formdev.flatlaf.util;
 
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -77,7 +78,7 @@ debug*/
 		double scaleFactor = systemScaleFactor * userScaleFactor;
 
 		// paint input image icon if not necessary to scale
-		if( scaleFactor == 1 && iconWidth == imageIcon.getIconWidth() && iconHeight == imageIcon.getIconHeight() ) {
+		if( scaleFactor == 1 && imageIcon != null && iconWidth == imageIcon.getIconWidth() && iconHeight == imageIcon.getIconHeight() ) {
 			imageIcon.paintIcon( c, g, x, y );
 			return;
 		}
@@ -99,8 +100,20 @@ debug*/
 		Image image = getResolutionVariant( destImageWidth, destImageHeight );
 
 		// size of image
-		int imageWidth = image.getWidth( null );
-		int imageHeight = image.getHeight( null );
+		int imageWidth = -1;
+		int imageHeight = -1;
+
+		if (image != null) {
+			imageWidth = image.getWidth( null );
+			imageHeight = image.getHeight( null );
+		}
+
+		// paint red rectangle if image has invalid size (e.g. not found)
+		if( imageWidth < 0 || imageHeight < 0 ) {
+			g.setColor( Color.red );
+			g.fillRect( x, y, getIconWidth(), getIconHeight() );
+			return;
+		}
 
 		// scale image if necessary to destination size
 		if( imageWidth != destImageWidth || imageHeight != destImageHeight ) {
